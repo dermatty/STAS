@@ -12,12 +12,16 @@ import os
 import datetime
 import configparser
 from Crypto.Cipher import AES
-import hashlib
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto import Random
+from cryptography.fernet import Fernet
+# import hashlib
 import io
 import time
 from multiprocessing import Pool, cpu_count
 import psutil
 import argparse
+import base64
 
 
 FSIZE = 0
@@ -30,7 +34,14 @@ def showdot(block):
     global FTRANSFERRED
     global FSIZE
     FTRANSFERRED += 1024
-    print("\r", int(FTRANSFERRED/FSIZE * 100), "% ", end="")
+    return
+    if FSIZE == 0:
+        perc = 1
+    else:
+        perc = FTRANSFERRED/FSIZE
+        if perc > 1:
+            perc = 1
+    print("\r", int(perc * 100), "% ", end="")
 
 
 class StasFTP(object):
@@ -161,13 +172,34 @@ def encrypt_otf_standalone(param):
 
 
 class StasEncrypt(object):
-    def __init__(self, password, stasftp):
-        passbyte = str.encode(password)
-        hash_object = hashlib.sha256(passbyte)
+    def __init__(self, password, fernet, stasftp):
+        # passbyte = str.encode(password)
+
+        '''hash_object = hashlib.sha256(passbyte)
         hex_dig = hash_object.hexdigest()
         self.KEY = str.encode(hex_dig[:16])
+        print(self.KEY)'''
+
+        '''passbyte = Random.get_random_bytes(32)
+        print(passbyte)
+        iterations = 5000
+        salt = os.urandom(32)
+        key = PBKDF2(passbyte, salt, dkLen=16, count=iterations)
+        print(key)
+        sys.exit()'''
+        self.KEY = password
+        self.FERNET = fernet
         self.STASFTP = stasftp
         self.MAXMEM = psutil.virtual_memory()[0]
+
+    def fernet_encrypt(self, s):
+        token = self.FERNET.encrypt(s.encode())
+        return token.decode()
+
+    def fernet_decrypt(self, s):
+        token = s.encode()
+        decrypted = self.FERNET.decrypt(token)
+        return decrypted.decoded()
 
     # Opens (local) @infile and encrypts it to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
@@ -232,14 +264,14 @@ class StasEncrypt(object):
                 fn, ts, _, _ = u
                 res = self.Encrypt_and_uploadtoFTP(ftp_path, fn, ts)
             return res
-        printlog(1, "Starting parallel encryption of", len(uploadlist), " files")
+        printlog(1, "Starting parallel encryption of " + str(len(uploadlist)) + " files")
         t0 = time.time()
         with Pool(cpu_count()) as p:
             flist = p.map(encrypt_otf_standalone, uploadlist)
-        printlog(2, "Encryption took", time.time() - t0, "sec.")
+        printlog(2, "Encryption took " + str(time.time() - t0) + " sec.")
         for f, local_fn, fmts, fsize in flist:
-            local_fn0 = local_fn.split("/")[-1]
-            ftp_fn = ftp_path + "/" + local_fn0 + ".enc"
+            local_fn0 = self.fernet_encrypt(local_fn.split("/")[-1])
+            ftp_fn = ftp_path + "/" + local_fn0
             if f == -1:
                 printlog(2, "Skipping upload of file " + local_fn0)
             try:
@@ -267,8 +299,8 @@ class StasEncrypt(object):
             print("Aborting encrypted file upload")
             return -1
         # upload to FTP
-        local_fn0 = local_fn.split("/")[-1]
-        ftp_fn = ftp_path + "/" + local_fn0 + ".enc"
+        local_fn0 = self.fernet_encrypt(local_fn.split("/")[-1])
+        ftp_fn = ftp_path + "/" + local_fn0
         try:
             res0 = self.STASFTP.upload_file(f, ftp_fn)
             f.close()
@@ -386,13 +418,13 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             if (matched and sts > fts) or (not matched) or (matched and sizeratio > 0.2 and ssize > 1000):
                 if (matched and sizeratio > 0.2 and ssize > 1000):
                     source_ts = datetime.datetime.fromtimestamp(sts)
-                    printlog(1, "Incomplete file on FTP: adding", sfn0 + ".enc", source_ts, " to upload queue")
-                    printlog(1, "   Size on FTP , Size on source, Ratio:", fsize, ssize, sizeratio)
+                    printlog(1, "Incomplete file on FTP: adding" + sfn0 + str(source_ts) + " to upload queue")
+                    printlog(1, "   Size on FTP , Size on source, Ratio:" + str(fsize) + " " + str(ssize) + " " + str(sizeratio))
                 elif (matched and sts > fts):
                     source_ts = datetime.datetime.fromtimestamp(sts)
-                    printlog(1, "Replacment because of newer: adding", sfn0 + ".enc", source_ts, " to upload queue")
+                    printlog(1, "Replacment because of newer: adding " + sfn0 + str(source_ts) + " to upload queue")
                 else:
-                    printlog(1, "New upload: adding " + sfn0 + ".enc to FTP upload queue")
+                    printlog(1, "New upload: adding " + sfn0 + " to FTP upload queue")
                 uploadlist.append((sfn, sts, senc.KEY, ssize))
         senc.Encrypt_and_uploadFTP_parallel(sftp, ftp_path, uploadlist)
     elif mode == "restore":
@@ -411,7 +443,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                 printlog(1, "Replacment because of newer: adding", ffn0, ftp_ts, " to download queue")
                 downloadlist.append((ffn, fts, senc.KEY, fsize))
             elif not matched:
-                printlog(1, "New download: adding " + ffn0 + ".enc to FTP download queue")
+                printlog(1, "New download: adding " + ffn0 + " to FTP download queue")
                 downloadlist.append((ffn, fts, senc.KEY, fsize))
         senc.DecryptFTP_and_download(sftp, local_path, downloadlist)
     if mode == "backup":
@@ -482,17 +514,16 @@ if __name__ == "__main__":
             printlog(0, "Mode has to be 'backup' or 'restore', exiting ...")
             sys.exit()
     if args.config is None:
-        STASCFGPATH = ("../data/stasftp.cfg")
+        STASCFGPATH = ("/media/nfs/NFS_Projekte/GIT/STAS/data/")
     else:
         STASCFGPATH = args.mode
-    print(SOURCEPATH, FTP_PATH, STASMODE, STASCFGPATH)
     try:
         stasftpcfg = configparser.ConfigParser()
-        stasftpcfg.read(STASCFGPATH)
+        stasftpcfg.read(STASCFGPATH + "stasftp.cfg")
         FTP_HOST = stasftpcfg["CONFIG"]["FTP_HOST"]
         FTP_USER = stasftpcfg["CONFIG"]["FTP_USER"]
         FTP_PASSWD = stasftpcfg["CONFIG"]["FTP_PASSWD"]
-        KEY_PASSWD = stasftpcfg["CONFIG"]["KEY_PASSWD"]
+        # KEY_PASSWD = stasftpcfg["CONFIG"]["KEY_PASSWD"]
         try:
             OUTPUT_VERBOSITY = int(stasftpcfg["LOG"]["OUTPUT_VERBOSITY"])
             LOG_VERBOSITY = int(stasftpcfg["LOG"]["LOG_VERBOSITY"])
@@ -502,11 +533,46 @@ if __name__ == "__main__":
     except Exception as e:
         printlog(0, str(e) + ": Cannot get (complete) STASFTP config, exiting ...")
         sys.exit()
+    # import / generate AES_key file
+    try:
+        KEY_PASSWD = base64.b64decode(open(STASCFGPATH + "AES_key", "rb").read())
+        printlog(2, "Read key from AES_key file successfull!")
+    except Exception as e:
+        if STASMODE == "restore":
+            printlog(2, "AES_key file cannot be found, please provide AES key file!")
+            sys.exit()
+        passbyte = Random.get_random_bytes(32)
+        iterations = 5000
+        salt = os.urandom(32)
+        KEY_PASSWD = PBKDF2(passbyte, salt, dkLen=16, count=iterations)
+        encoded_passwd = base64.b64encode(KEY_PASSWD)
+        f = open(STASCFGPATH + "AES_key", "wb")
+        f.write(encoded_passwd)
+        f.close()
+        printlog(2, "No AES_key file found, generated new key and saved in file.")
+    # import / generate Fernet_key file
+    try:
+        key = open(STASCFGPATH + "Fernet_key", "rb").read()
+        FERNET = Fernet(key)
+        printlog(2, "Read key from Fernet_key file successfull!")
+    except Exception as e:
+        if STASMODE == "restore":
+            printlog(2, "Fernet_key file cannot be found, please provide Fernet key file!")
+            sys.exit()
+        key = Fernet.generate_key()
+        FERNET = Fernet(key)
+        f = open(STASCFGPATH + "Fernet_key", "wb")
+        f.write(key)
+        f.close()
+        printlog(2, "No Fernet_key file found, generated new key and saved in file.")
     sftp = StasFTP(FTP_HOST, FTP_USER, FTP_PASSWD)
     if sftp.FTP_STATUS == -1:
         printlog(0, sftp.FTP_ERROR + ": FTP connection error, exiting ...")
         sys.exit()
     else:
         printlog(2, "FTP '" + sftp.FTP_HOST + "' connected!")
-    senc = StasEncrypt(KEY_PASSWD, sftp)
+    senc = StasEncrypt(KEY_PASSWD, FERNET, sftp)
     SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
+
+# to do
+# fernet also bei download, allen vergleichen und directories
