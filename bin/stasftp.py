@@ -22,6 +22,7 @@ from multiprocessing import Pool, cpu_count
 import psutil
 import argparse
 import base64
+import shutil
 
 
 FSIZE = 0
@@ -197,9 +198,12 @@ class StasEncrypt(object):
         return token.decode()
 
     def fernet_decrypt(self, s):
-        token = s.encode()
-        decrypted = self.FERNET.decrypt(token)
-        return decrypted.decoded()
+        try:
+            token = s.encode()
+            decrypted = self.FERNET.decrypt(token)
+            return decrypted.decode()
+        except:
+            return -1
 
     # Opens (local) @infile and encrypts it to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
@@ -245,8 +249,7 @@ class StasEncrypt(object):
             if f_encrypted == -1:
                 printlog(0, "Cannot download from FTP: " + fn + ", skipping")
                 continue
-            fn0 = fn.split("/")[-1]
-            fn0 = fn0.replace(".enc", "")
+            fn0 = self.fernet_decrypt(fn.split("/")[-1])
             local_fn = local_path + "/" + fn0
             printlog(2, "Decrypting from RAM and saving: " + local_fn)
             self.decrypt_otf(f_encrypted, local_fn, fts)
@@ -408,7 +411,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             sizeratio = 1
             for ffn0, ffn, fsize, fmdate in ftp_files:
                 fts = fmdate.timestamp()
-                if sfn0 + ".enc" == ffn0:
+                if sfn0 == senc.fernet_decrypt(ffn0):
                     try:
                         sizeratio = abs((int(fsize) - 30) / int(ssize) - 1)
                     except:
@@ -420,9 +423,11 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                     source_ts = datetime.datetime.fromtimestamp(sts)
                     printlog(1, "Incomplete file on FTP: adding" + sfn0 + str(source_ts) + " to upload queue")
                     printlog(1, "   Size on FTP , Size on source, Ratio:" + str(fsize) + " " + str(ssize) + " " + str(sizeratio))
+                    sftp.delete(ffn)
                 elif (matched and sts > fts):
                     source_ts = datetime.datetime.fromtimestamp(sts)
                     printlog(1, "Replacment because of newer: adding " + sfn0 + str(source_ts) + " to upload queue")
+                    sftp.delete(ffn)
                 else:
                     printlog(1, "New upload: adding " + sfn0 + " to FTP upload queue")
                 uploadlist.append((sfn, sts, senc.KEY, ssize))
@@ -435,7 +440,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             matched = False
             fts = fmdate.timestamp()
             for sfn0, sfn, ssize, sts in dir_file_det:
-                if sfn0 + ".enc" == ffn0:
+                if sfn0 == senc.fernet_decrypt(ffn0):
                     matched = True
                     break
             if (matched and fts > sts):
@@ -451,7 +456,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for ffn0, ffn, fsize, fmdate in ftp_files:
             matched = False
             for sfn0, sfn, ssize, smdate in dir_file_det:
-                if ffn0 == sfn0 + ".enc":
+                if senc.fernet_decrypt(ffn0) == sfn0:
                     matched = True
                     break
             if not matched:
@@ -459,23 +464,49 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                 sftp.delete(ffn)
     elif mode == "restore":
         # Part IIb. compare local to FTP and delete files on local which are not on FTP
-        pass
+        for sfn0, sfn, ssize, smdate in dir_file_det:
+            matched = False
+            for ffn0, ffn, fsize, fmdate in ftp_files:
+                if senc.fernet_decrypt(ffn0) == sfn0:
+                    matched = True
+                    break
+            if not matched:
+                printlog(1, sfn0 + " not found on FTP, deleting locally ...")
+                os.remove(sfn)
     if mode == "backup":
         # Part IIIa. compare FTP dirs to local dirs and delete dirs on FTP which are not local
         for fd0 in ftp_dirs:
-            if fd0 not in dir_dirs:
+            fd00 = senc.fernet_decrypt(fd0)
+            if fd00 == -1 or fd00 not in dir_dirs:
                 printlog(1, "Directory " + ftp_path + "/" + fd0 + " not found locally, deleting from FTP ...")
                 deleteFTPDirectoryRecursive(sftp, ftp_path + "/" + fd0)
     elif mode == "restore":
         # Part IIIb. compare local dirs to FTP dirs and delete local dirs which are not on FTP
-        pass
+        for sd0 in dir_dirs:
+            matched = False
+            for fd0 in ftp_dirs:
+                fd00 = senc.fernet_decrypt(fd0)
+                if sd0 == fd00:
+                    matched = True
+                    break
+            if not matched:
+                printlog(1, "Directory " + local_path + "/" + sd0 + " not found on FTP, deleting locally ...")
+                shutil.rmtree(local_path + "/" + sd0)
     # recursion to other directories
     if mode == "backup":
         dirlist = dir_dirs
     elif mode == "restore":
         dirlist = ftp_dirs
     for dd in dirlist:
-        SyncLocalDir(sftp, senc, local_path + "/" + dd, ftp_path + "/" + dd, recursion + 1, mode=mode)
+        if mode == "backup":
+            dd0 = senc.fernet_encrypt(dd)
+            for ff in ftp_dirs:
+                if senc.fernet_decrypt(ff) == dd:
+                    dd0 = ff
+                    break
+            SyncLocalDir(sftp, senc, local_path + "/" + dd, ftp_path + "/" + dd0, recursion + 1, mode=mode)
+        elif mode == "restore":
+            SyncLocalDir(sftp, senc, local_path + "/" + senc.fernet_decrypt(dd), ftp_path + "/" + dd, recursion + 1, mode=mode)
 
 
 def printlog(level, msg):
