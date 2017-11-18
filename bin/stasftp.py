@@ -35,7 +35,6 @@ def showdot(block):
     global FTRANSFERRED
     global FSIZE
     FTRANSFERRED += 1024
-    return
     if FSIZE == 0:
         perc = 1
     else:
@@ -79,9 +78,11 @@ class StasFTP(object):
         FTRANSFERRED = 0
         try:
             self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
+            printlog(2, "- success!")
             return 0
         except Exception as e:
             printlog(0, str(e) + ": cannot upload file!")
+            return -1
 
     def download_file(self, ftp_fn, fsize):
         # downloads file to bytesIO
@@ -173,37 +174,20 @@ def encrypt_otf_standalone(param):
 
 
 class StasEncrypt(object):
-    def __init__(self, password, fernet, stasftp):
-        # passbyte = str.encode(password)
-
-        '''hash_object = hashlib.sha256(passbyte)
-        hex_dig = hash_object.hexdigest()
-        self.KEY = str.encode(hex_dig[:16])
-        print(self.KEY)'''
-
-        '''passbyte = Random.get_random_bytes(32)
-        print(passbyte)
-        iterations = 5000
-        salt = os.urandom(32)
-        key = PBKDF2(passbyte, salt, dkLen=16, count=iterations)
-        print(key)
-        sys.exit()'''
+    def __init__(self, password, stasftp):
         self.KEY = password
-        self.FERNET = fernet
         self.STASFTP = stasftp
         self.MAXMEM = psutil.virtual_memory()[0]
 
+    # in theory a file name encryption can be implemented here ... didnt find on so far
     def fernet_encrypt(self, s):
-        token = self.FERNET.encrypt(s.encode())
-        return token.decode()
+        return s + ".enc"
 
+    # in theory a file name decryption can be implemented here ... didnt find on so far
     def fernet_decrypt(self, s):
-        try:
-            token = s.encode()
-            decrypted = self.FERNET.decrypt(token)
-            return decrypted.decode()
-        except:
-            return -1
+        if s.endswith('.enc'):
+            s = s[:-4]
+        return s
 
     # Opens (local) @infile and encrypts it to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
@@ -261,6 +245,7 @@ class StasEncrypt(object):
         printlog(2, "Checking for sufficient memory for parallel encryption")
         freemem = psutil.virtual_memory()[1]
         neededmem = sum([sz for (_, _, _, sz) in uploadlist])
+        printlog(2, "Free:" + str(freemem) + ", Needed: " + str(neededmem))
         if neededmem * 1.15 > freemem:
             printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
             for u in uploadlist:
@@ -514,7 +499,7 @@ def printlog(level, msg):
     # level 0: critical , level 2: all
     if level <= OUTPUT_VERBOSITY:
         if level == 0:
-            msg = "ERROR: " + msg
+            msg = "!ERROR: " + msg
         print(msg)
 
 
@@ -581,28 +566,13 @@ if __name__ == "__main__":
         f.write(encoded_passwd)
         f.close()
         printlog(2, "No AES_key file found, generated new key and saved in file.")
-    # import / generate Fernet_key file
-    try:
-        key = open(STASCFGPATH + "Fernet_key", "rb").read()
-        FERNET = Fernet(key)
-        printlog(2, "Read key from Fernet_key file successfull!")
-    except Exception as e:
-        if STASMODE == "restore":
-            printlog(2, "Fernet_key file cannot be found, please provide Fernet key file!")
-            sys.exit()
-        key = Fernet.generate_key()
-        FERNET = Fernet(key)
-        f = open(STASCFGPATH + "Fernet_key", "wb")
-        f.write(key)
-        f.close()
-        printlog(2, "No Fernet_key file found, generated new key and saved in file.")
     sftp = StasFTP(FTP_HOST, FTP_USER, FTP_PASSWD)
     if sftp.FTP_STATUS == -1:
         printlog(0, sftp.FTP_ERROR + ": FTP connection error, exiting ...")
         sys.exit()
     else:
         printlog(2, "FTP '" + sftp.FTP_HOST + "' connected!")
-    senc = StasEncrypt(KEY_PASSWD, FERNET, sftp)
+    senc = StasEncrypt(KEY_PASSWD, sftp)
     SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
 
 # to do
