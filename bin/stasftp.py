@@ -14,8 +14,6 @@ import configparser
 from Crypto.Cipher import AES
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto import Random
-from cryptography.fernet import Fernet
-# import hashlib
 import io
 import time
 from multiprocessing import Pool, cpu_count
@@ -23,18 +21,31 @@ import psutil
 import argparse
 import base64
 import shutil
+import logging
+import logging.handlers
 
-
+# globals
 FSIZE = 0
 FTRANSFERRED = 0
 OUTPUT_VERBOSITY = 2
 LOG_VERBOSITY = 2
 
+# Init Logger
+logger = logging.getLogger("stasftp")
+logger.setLevel(logging.INFO)
+fh = logging.FileHandler("../data/stasftp.log", mode="w")
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
 
 def showdot(block):
     global FTRANSFERRED
     global FSIZE
+    global OUTPUT_VERBOSITY
     FTRANSFERRED += 1024
+    if OUTPUT_VERBOSITY < 2:
+        return
     if FSIZE == 0:
         perc = 1
     else:
@@ -78,7 +89,6 @@ class StasFTP(object):
         FTRANSFERRED = 0
         try:
             self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
-            printlog(2, "- success!")
             return 0
         except Exception as e:
             printlog(0, str(e) + ": cannot upload file!")
@@ -107,7 +117,7 @@ class StasFTP(object):
         try:
             self.FTPS.mkd(ftpdir)
             # mfmtstr = self.mk_utc_ftp_timestamp(fmts, ftpdir + "/")
-            print("**** Creating new directory " + ftpdir)    # + " : " + mfmtstr)
+            printlog(2, "Creating new directory " + ftpdir)    # + " : " + mfmtstr)
             return 0
         except Exception as e:
             printlog(0, str(e) + " : exiting ...")
@@ -174,20 +184,53 @@ def encrypt_otf_standalone(param):
 
 
 class StasEncrypt(object):
-    def __init__(self, password, stasftp):
+    def __init__(self, password, vig_key, stasftp):
         self.KEY = password
+        self.VIG_KEY = vig_key
         self.STASFTP = stasftp
         self.MAXMEM = psutil.virtual_memory()[0]
+        self.ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    # in theory a file name encryption can be implemented here ... didnt find on so far
-    def fernet_encrypt(self, s):
-        return s + ".enc"
+    def vignere_encrypt(self, plain):
+        alpha = self.ALPHA
+        plaintext = make_ascii(plain)
+        alpha_len = len(alpha)
+        key_as_int = [ord(i) for i in self.VIG_KEY]
+        plaintext_int = [ord(i) for i in plaintext]
+        ciphertext = ''
+        for i in range(len(plaintext_int)):
+            islower = plaintext_int[i] in range(ord("a"), ord("z") + 1)
+            isupper = plaintext_int[i] in range(ord("A"), ord("Z") + 1)
+            if not islower and not isupper:
+                ciphertext += chr(plaintext_int[i])
+                continue
+            ch = chr(plaintext_int[i]).upper()
+            value = (ord(ch) + key_as_int[i]) % alpha_len
+            if islower:
+                ciphertext += alpha[value].lower()
+            else:
+                ciphertext += alpha[value]
+        return ciphertext
 
-    # in theory a file name decryption can be implemented here ... didnt find on so far
-    def fernet_decrypt(self, s):
-        if s.endswith('.enc'):
-            s = s[:-4]
-        return s
+    def vignere_decrypt(self, ciphertext):
+        alpha = self.ALPHA
+        alpha_len = len(alpha)
+        key_as_int = [ord(i) for i in self.VIG_KEY]
+        ciphertext_int = [ord(i) for i in ciphertext]
+        plaintext = ''
+        for i in range(len(ciphertext_int)):
+            islower = ciphertext_int[i] in range(ord("a"), ord("z") + 1)
+            isupper = ciphertext_int[i] in range(ord("A"), ord("Z") + 1)
+            if not islower and not isupper:
+                plaintext += chr(ciphertext_int[i])
+                continue
+            ch = chr(ciphertext_int[i]).upper()
+            value = (ord(ch) - key_as_int[i]) % alpha_len
+            if islower:
+                plaintext += alpha[value].lower()
+            else:
+                plaintext += alpha[value]
+        return plaintext
 
     # Opens (local) @infile and encrypts it to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
@@ -204,7 +247,7 @@ class StasEncrypt(object):
         f = io.BytesIO()
         [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
         f.seek(0)
-        print("---->", time.time() - t0)
+        printlog(2, "---->" + str(time.time() - t0))
         return f
 
     def decrypt_otf(self, infile, outfile, fts):
@@ -233,11 +276,17 @@ class StasEncrypt(object):
             if f_encrypted == -1:
                 printlog(0, "Cannot download from FTP: " + fn + ", skipping")
                 continue
-            fn0 = self.fernet_decrypt(fn.split("/")[-1])
+            else:
+                printlog(1, "Download of: " + fn + " - success")
+            fn0 = self.vignere_decrypt(fn.split("/")[-1])
             local_fn = local_path + "/" + fn0
             printlog(2, "Decrypting from RAM and saving: " + local_fn)
-            self.decrypt_otf(f_encrypted, local_fn, fts)
+            res0 = self.decrypt_otf(f_encrypted, local_fn, fts)
             f_encrypted.close()
+            if res0 == 0:
+                printlog(1, "Decryption + save of: " + fn + " to " + local_fn + " - success")
+            else:
+                printlog(0, "Cannot decrypt/save " + fn + "!")
 
     def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
         if not uploadlist:
@@ -258,7 +307,7 @@ class StasEncrypt(object):
             flist = p.map(encrypt_otf_standalone, uploadlist)
         printlog(2, "Encryption took " + str(time.time() - t0) + " sec.")
         for f, local_fn, fmts, fsize in flist:
-            local_fn0 = self.fernet_encrypt(local_fn.split("/")[-1])
+            local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
             ftp_fn = ftp_path + "/" + local_fn0
             if f == -1:
                 printlog(2, "Skipping upload of file " + local_fn0)
@@ -268,6 +317,8 @@ class StasEncrypt(object):
                 f.close()
                 if res0 == -1:
                     raise("FTP upload error")
+                else:
+                    printlog(1, "Upload of: " + local_fn + " - success")
                 res0 = stasftp.mk_utc_ftp_timestamp(fmts, ftp_fn)
                 if res0 == -1:
                     raise("FTP MFMT error")
@@ -284,16 +335,18 @@ class StasEncrypt(object):
         # encrypt local file to bytesio
         f = self.encrypt_otf(local_fn)
         if f == -1:
-            print("Aborting encrypted file upload")
+            printlog(0, "Aborting encrypted file upload")
             return -1
         # upload to FTP
-        local_fn0 = self.fernet_encrypt(local_fn.split("/")[-1])
+        local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
         ftp_fn = ftp_path + "/" + local_fn0
         try:
             res0 = self.STASFTP.upload_file(f, ftp_fn)
             f.close()
             if res0 == -1:
                 raise("FTP upload error")
+            else:
+                printlog(1, "Upload of: " + local_fn + " - success")
             res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
             if res0 == -1:
                 raise("FTP MFMT error")
@@ -301,6 +354,16 @@ class StasEncrypt(object):
         except Exception as e:
             printlog(0, str(e) + ": upload/MFMT to FTP failed!")
             return -1
+
+
+def make_ascii(txt):
+    sret = ""
+    for t in txt:
+        if ord(t) < 32 or ord(t) > 126 or t == "/":
+            sret += "?"
+        else:
+            sret += t
+    return sret
 
 
 def deleteFTPDirectoryRecursive(sftp, ftpdir):
@@ -370,7 +433,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         printlog(2, "  " + dfd_fn0 + " : " + dfd_fn + " : " + str(dfd_mdate) + " : " + str(dfd_size))
     printlog(2, "FTP directories:" + ftp_path)
     for m in ftp_dirs:
-        print("  " + m)
+        printlog(2, "  " + m)
     # Read local directory
     dir_dirs = next(os.walk(local_path))[1]
     dir_files = next(os.walk(local_path))[2]
@@ -383,11 +446,11 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
     if dir_file_det:
         printlog(2, "Local files: " + local_path)
         for (dfd_fn0, dfd_fn, dfd_size, dfd_mdate) in dir_file_det:
-            print("  " + dfd_fn0 + " : " + dfd_fn + " : " + str(dfd_mdate) + " : " + str(dfd_size))
+            printlog(2, "  " + dfd_fn0 + " : " + dfd_fn + " : " + str(dfd_mdate) + " : " + str(dfd_size))
     if dir_dirs:
         printlog(2, "Local directories: " + local_path)
         for d in dir_dirs:
-            print("  " + d)
+            printlog(2, "  " + d)
     if mode == "backup":
         # Part Ia. compare local to ftp and update FTP files or upload (if not ye on FTP)
         uploadlist = []
@@ -396,7 +459,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             sizeratio = 1
             for ffn0, ffn, fsize, fmdate in ftp_files:
                 fts = fmdate.timestamp()
-                if sfn0 == senc.fernet_decrypt(ffn0):
+                if sfn0 == senc.vignere_decrypt(ffn0):
                     try:
                         sizeratio = abs((int(fsize) - 30) / int(ssize) - 1)
                     except:
@@ -406,12 +469,12 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             if (matched and sts > fts) or (not matched) or (matched and sizeratio > 0.2 and ssize > 1000):
                 if (matched and sizeratio > 0.2 and ssize > 1000):
                     source_ts = datetime.datetime.fromtimestamp(sts)
-                    printlog(1, "Incomplete file on FTP: adding" + sfn0 + str(source_ts) + " to upload queue")
+                    printlog(1, "Incomplete file on FTP: adding " + sfn0 + " (" + str(source_ts) + ") to upload queue")
                     printlog(1, "   Size on FTP , Size on source, Ratio:" + str(fsize) + " " + str(ssize) + " " + str(sizeratio))
                     sftp.delete(ffn)
                 elif (matched and sts > fts):
                     source_ts = datetime.datetime.fromtimestamp(sts)
-                    printlog(1, "Replacment because of newer: adding " + sfn0 + str(source_ts) + " to upload queue")
+                    printlog(1, "Replacment because of newer: adding " + sfn0 + " (" + str(source_ts) + ") to upload queue")
                     sftp.delete(ffn)
                 else:
                     printlog(1, "New upload: adding " + sfn0 + " to FTP upload queue")
@@ -425,7 +488,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             matched = False
             fts = fmdate.timestamp()
             for sfn0, sfn, ssize, sts in dir_file_det:
-                if sfn0 == senc.fernet_decrypt(ffn0):
+                if sfn0 == senc.vignere_decrypt(ffn0):
                     matched = True
                     break
             if (matched and fts > sts):
@@ -441,7 +504,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for ffn0, ffn, fsize, fmdate in ftp_files:
             matched = False
             for sfn0, sfn, ssize, smdate in dir_file_det:
-                if senc.fernet_decrypt(ffn0) == sfn0:
+                if senc.vignere_decrypt(ffn0) == sfn0:
                     matched = True
                     break
             if not matched:
@@ -452,7 +515,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for sfn0, sfn, ssize, smdate in dir_file_det:
             matched = False
             for ffn0, ffn, fsize, fmdate in ftp_files:
-                if senc.fernet_decrypt(ffn0) == sfn0:
+                if senc.vignere_decrypt(ffn0) == sfn0:
                     matched = True
                     break
             if not matched:
@@ -461,7 +524,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
     if mode == "backup":
         # Part IIIa. compare FTP dirs to local dirs and delete dirs on FTP which are not local
         for fd0 in ftp_dirs:
-            fd00 = senc.fernet_decrypt(fd0)
+            fd00 = senc.vignere_decrypt(fd0)
             if fd00 == -1 or fd00 not in dir_dirs:
                 printlog(1, "Directory " + ftp_path + "/" + fd0 + " not found locally, deleting from FTP ...")
                 deleteFTPDirectoryRecursive(sftp, ftp_path + "/" + fd0)
@@ -470,7 +533,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for sd0 in dir_dirs:
             matched = False
             for fd0 in ftp_dirs:
-                fd00 = senc.fernet_decrypt(fd0)
+                fd00 = senc.vignere_decrypt(fd0)
                 if sd0 == fd00:
                     matched = True
                     break
@@ -484,14 +547,14 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         dirlist = ftp_dirs
     for dd in dirlist:
         if mode == "backup":
-            dd0 = senc.fernet_encrypt(dd)
+            dd0 = senc.vignere_encrypt(dd)
             for ff in ftp_dirs:
-                if senc.fernet_decrypt(ff) == dd:
+                if senc.vignere_decrypt(ff) == dd:
                     dd0 = ff
                     break
             SyncLocalDir(sftp, senc, local_path + "/" + dd, ftp_path + "/" + dd0, recursion + 1, mode=mode)
         elif mode == "restore":
-            SyncLocalDir(sftp, senc, local_path + "/" + senc.fernet_decrypt(dd), ftp_path + "/" + dd, recursion + 1, mode=mode)
+            SyncLocalDir(sftp, senc, local_path + "/" + senc.vignere_decrypt(dd), ftp_path + "/" + dd, recursion + 1, mode=mode)
 
 
 def printlog(level, msg):
@@ -501,6 +564,12 @@ def printlog(level, msg):
         if level == 0:
             msg = "!ERROR: " + msg
         print(msg)
+    # logging
+    if level <= LOG_VERBOSITY:
+        if level == 0:
+            logger.error(msg)
+        elif level == 1 or level == 2:
+            logger.info(msg)
 
 
 if __name__ == "__main__":
@@ -566,13 +635,31 @@ if __name__ == "__main__":
         f.write(encoded_passwd)
         f.close()
         printlog(2, "No AES_key file found, generated new key and saved in file.")
+    # import / generate VIGNERE_key file
+    try:
+        encoded_vig_pw = open(STASCFGPATH + "VIGNERE_key", "rb").read()
+        printlog(2, "Read key from VIGNERE_key file successfull!")
+    except Exception as e:
+        if STASMODE == "restore":
+            printlog(2, "VIGNERE_key file cannot be found, please provide VIGNERE key file!")
+            sys.exit()
+        passbyte = Random.get_random_bytes(255)
+        iterations = 5000
+        salt = os.urandom(32)
+        vignere_passw = PBKDF2(passbyte, salt, dkLen=255, count=iterations)
+        encoded_vig_pw = base64.b64encode(vignere_passw)
+        f = open(STASCFGPATH + "VIGNERE_key", "wb")
+        f.write(encoded_vig_pw)
+        f.close()
+        printlog(2, "No VIGNERE_key file found, generated new key and saved in file.")
+    VIGNERE_KEY = make_ascii(encoded_vig_pw.decode())
     sftp = StasFTP(FTP_HOST, FTP_USER, FTP_PASSWD)
     if sftp.FTP_STATUS == -1:
         printlog(0, sftp.FTP_ERROR + ": FTP connection error, exiting ...")
         sys.exit()
     else:
         printlog(2, "FTP '" + sftp.FTP_HOST + "' connected!")
-    senc = StasEncrypt(KEY_PASSWD, sftp)
+    senc = StasEncrypt(KEY_PASSWD, VIGNERE_KEY, sftp)
     SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
 
 # to do

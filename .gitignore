@@ -1,1 +1,5 @@
-data/
+data/AES_key
+data/ftptest
+data/ftptest_restore
+data/stasftp.log
+data/VIGNERE_key

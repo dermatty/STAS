@@ -7,6 +7,10 @@ import os
 import sys
 import ftplib
 import configparser
+from Crypto import Random
+import base64
+from itertools import cycle
+from functools import reduce
 
 
 def FTPencrypt_and_upload(ftps, ftp_path, local_fn, fmts, key):
@@ -101,7 +105,71 @@ def decrypt(infile, key):
     f_out.close()
 
 
-PASSWORD = "DeppDuDepp1"
+def make_ascii(txt):
+    sret = ""
+    for t in txt:
+        if ord(t) < 32 or ord(t) > 126 or t == "/":
+            sret += "?"
+        else:
+            sret += t
+    return sret
+
+
+def vig_encrypt2(plain, key):
+    alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    plaintext = make_ascii(plain)
+    alpha_len = len(alpha)
+    key_as_int = [ord(i) for i in key]
+    plaintext_int = [ord(i) for i in plaintext]
+    ciphertext = ''
+    for i in range(len(plaintext_int)):
+        islower = plaintext_int[i] in range(ord("a"), ord("z") + 1)
+        isupper = plaintext_int[i] in range(ord("A"), ord("Z") + 1)
+        if not islower and not isupper:
+            ciphertext += chr(plaintext_int[i])
+            continue
+        ch = chr(plaintext_int[i]).upper()
+        value = (ord(ch) + key_as_int[i]) % alpha_len
+        if islower:
+            ciphertext += alpha[value].lower()
+        else:
+            ciphertext += alpha[value]
+    return ciphertext
+
+
+def vig_decrypt2(ciphertext, key):
+    alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    alpha_len = len(alpha)
+    key_as_int = [ord(i) for i in key]
+    ciphertext_int = [ord(i) for i in ciphertext]
+    plaintext = ''
+    for i in range(len(ciphertext_int)):
+        islower = ciphertext_int[i] in range(ord("a"), ord("z") + 1)
+        isupper = ciphertext_int[i] in range(ord("A"), ord("Z") + 1)
+        if not islower and not isupper:
+            plaintext += chr(ciphertext_int[i])
+            continue
+        ch = chr(ciphertext_int[i]).upper()
+        value = (ord(ch) - key_as_int[i]) % alpha_len
+        if islower:
+            plaintext += alpha[value].lower()
+        else:
+            plaintext += alpha[value]
+    return plaintext
+
+
+passbyte = Random.get_random_bytes(255)
+TXT = "DU deppert ### OASch DUDU!!"
+KEY = make_ascii(base64.b64encode(passbyte).decode())
+encrypted = vig_encrypt2(TXT, KEY)
+decrypted = vig_decrypt2(encrypted, KEY)
+print("KEY: ", KEY, len(KEY))
+print("TXT: ", TXT)
+print("-" * 50)
+print(encrypted)
+print(decrypted)
+
+'''PASSWORD = "DeppDuDepp1"
 
 # password to 16-byte key for AES via hashlib
 passbyte = str.encode(PASSWORD)
@@ -109,7 +177,7 @@ hash_object = hashlib.sha256(passbyte)
 hex_dig = hash_object.hexdigest()
 key = str.encode(hex_dig[:16])
 
-'''
+
 encrypt("photo.jpg", key)
 decrypt("photo.jpg.enc", key)
 
@@ -120,7 +188,6 @@ decrypt_string(s, key)
 
 f = encrypt_otf("photo.jpg", key)
 decrypt_otf(f, "photo_dec.jpg", key)
-'''
 
 SOURCEPATH = "/media/nfs/NFS_Projekte/GIT/STASFTP/data/ftptest/"
 FTP_PATH = "/ftptest"
@@ -142,3 +209,4 @@ ftp_path = "/ftptest"
 fmts = os.path.getmtime(local_fn)
 
 FTPencrypt_and_upload(FTPS, ftp_path, local_fn, fmts, key)
+'''
