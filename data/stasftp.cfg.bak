@@ -1,0 +1,16 @@
+[CONFIG]
+FTP_HOST = ftp.host.com
+FTP_USER = abcdefg
+FTP_PASSWD = mypassword
+
+[LOG]
+# OUTPUT_VERBOSITY
+# 0 ... Errors
+# 1 ... -""- + warnings
+# 2 ... -""- + info
+OUTPUT_VERBOSITY = 1
+# LOG_VERBOSITY
+# 0 ... Errors
+# 1 ... -""- + warnings
+# 2 ... -""- + info
+LOG_VERBOSITY = 1
