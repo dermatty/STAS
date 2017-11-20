@@ -22,6 +22,9 @@
 #
 # Licensed under GPLv3
 
+# TO DO:
+#    - add arg for logging file (-o)
+#    - parallel encryption for downloads
 
 import ftplib
 import sys
@@ -638,7 +641,7 @@ if __name__ == "__main__":
         STASCFGPATH = "../data/"
     else:
         STASCFGPATH = args.mode
-    #read config file
+    # read config file
     try:
         stasftpcfg = configparser.ConfigParser()
         stasftpcfg.read(STASCFGPATH + "stasftp.cfg")
