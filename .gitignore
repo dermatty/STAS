@@ -1,7 +1,8 @@
-
+data/ftptest
 data/ftptest_restore
 data/stasftp.log
 data/VIGENERE_key
+data/AES_key
 data/stasftp.cfg
 data/docs_restore
 bin/stasbackup.sh
