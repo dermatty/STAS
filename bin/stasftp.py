@@ -44,7 +44,7 @@ def showdot(block):
     global FSIZE
     global OUTPUT_VERBOSITY
     FTRANSFERRED += 1024
-    if OUTPUT_VERBOSITY < 2:
+    if OUTPUT_VERBOSITY < 1:
         return
     if FSIZE == 0:
         perc = 1
@@ -110,7 +110,7 @@ class StasFTP(object):
             self.FTPS.cwd(ftpdir)
             return 0
         except Exception as e:
-            printlog(0, str(e) + ": cannot change to ftp_dir " + ftpdir)
+            printlog(1, str(e) + ": cannot change to ftp_dir " + ftpdir)
             return -1
 
     def mkd(self, ftpdir, fmts):
@@ -599,7 +599,7 @@ if __name__ == "__main__":
             printlog(0, "Mode has to be 'backup' or 'restore', exiting ...")
             sys.exit()
     if args.config is None:
-        STASCFGPATH = ("/media/nfs/NFS_Projekte/GIT/STAS/data/")
+        STASCFGPATH = "../data/"
     else:
         STASCFGPATH = args.mode
     try:
@@ -635,31 +635,31 @@ if __name__ == "__main__":
         f.write(encoded_passwd)
         f.close()
         printlog(2, "No AES_key file found, generated new key and saved in file.")
-    # import / generate VIGNERE_key file
+    # import / generate VIGENERE_key file
     try:
-        encoded_vig_pw = open(STASCFGPATH + "VIGNERE_key", "rb").read()
-        printlog(2, "Read key from VIGNERE_key file successfull!")
+        encoded_vig_pw = open(STASCFGPATH + "VIGENERE_key", "rb").read()
+        printlog(2, "Read key from VIGENERE_key file successfull!")
     except Exception as e:
         if STASMODE == "restore":
-            printlog(2, "VIGNERE_key file cannot be found, please provide VIGNERE key file!")
+            printlog(2, "VIGENERE_key file cannot be found, please provide VIGENERE key file!")
             sys.exit()
         passbyte = Random.get_random_bytes(255)
         iterations = 5000
         salt = os.urandom(32)
         vignere_passw = PBKDF2(passbyte, salt, dkLen=255, count=iterations)
         encoded_vig_pw = base64.b64encode(vignere_passw)
-        f = open(STASCFGPATH + "VIGNERE_key", "wb")
+        f = open(STASCFGPATH + "VIGENERE_key", "wb")
         f.write(encoded_vig_pw)
         f.close()
-        printlog(2, "No VIGNERE_key file found, generated new key and saved in file.")
-    VIGNERE_KEY = make_ascii(encoded_vig_pw.decode())
+        printlog(2, "No VIGENERE_key file found, generated new key and saved in file.")
+    VIGENERE_KEY = make_ascii(encoded_vig_pw.decode())
     sftp = StasFTP(FTP_HOST, FTP_USER, FTP_PASSWD)
     if sftp.FTP_STATUS == -1:
         printlog(0, sftp.FTP_ERROR + ": FTP connection error, exiting ...")
         sys.exit()
     else:
         printlog(2, "FTP '" + sftp.FTP_HOST + "' connected!")
-    senc = StasEncrypt(KEY_PASSWD, VIGNERE_KEY, sftp)
+    senc = StasEncrypt(KEY_PASSWD, VIGENERE_KEY, sftp)
     SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
 
 # to do
