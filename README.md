@@ -19,9 +19,9 @@ Keys / Ciphers:
     !!! ONCE THIS FILES ARE GENERATED STORE THEM ON A SAFE PLACE AS WITHOUT THEM ENCRYPTED FILES
     !!! CANNOT BE DECRYPTED ANYMORE!!!
 
-configfile - stasftp.cfg): 
+configfile - stasftp.cfg: 
 --------------------------
-    in ~/.config/stasftp/stasftp.cfg
+    in ~/.config/stasftp/stasftp.cfg if not specified via -c arg.
 
 
 Licensed under the GPLv3
