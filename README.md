@@ -2,8 +2,13 @@ STASFTP
 
 Usage:
 ------
-    stasftp --local /path/to/source --remote /path/on/ftp --mode backup/restore --config /path/to/config
-    stasftp -l /path/to/source -r /path/on/ftp -m backup/restore -c /path/to/config
+    stasftp --local /path/to/source --remote /path/on/ftp --mode backup/restore 
+	    --parallel yes/no --config /path/to/config
+    stasftp -l /path/to/source -r /path/on/ftp -m backup/restore -p yes/no 
+	    -c /path/to/config
+	
+    --parallel: enables speedup through parallel encryption - only on stronger machines
+	with enough memory !!! otherways errors !!
 
     if mode == backup:
             backups --local to --remote doing in-memory on-the-fly encryption

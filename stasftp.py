@@ -24,6 +24,7 @@ FSIZE = 0
 FTRANSFERRED = 0
 OUTPUT_VERBOSITY = 2
 LOG_VERBOSITY = 2
+PARALLEL = False
 
 USERHOME = expanduser("~")
 
@@ -288,17 +289,18 @@ class StasEncrypt(object):
 
     # AES - Encrypts files in ftp_path to memory in parallel if possible and uploads it to ftp
     def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
+        global PARALLEL
         if not uploadlist:
             return 0
         printlog(2, "Checking for sufficient memory for parallel encryption")
         freemem = psutil.virtual_memory()[1]
         neededmem = sum([sz for (_, _, _, sz) in uploadlist])
         printlog(2, "Free:" + str(freemem) + ", Needed: " + str(neededmem))
-        if neededmem * 1.15 > freemem:
-            printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
+        if neededmem * 1.15 > freemem or not PARALLEL:
+            # printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
             for u in uploadlist:
-                fn, ts, _, _ = u
-                res = self.Encrypt_and_uploadtoFTP(ftp_path, fn, ts)
+                fn, ts, _, fs = u
+                res = self.Encrypt_and_uploadtoFTP(ftp_path, fn, ts, fs)
             return res
         printlog(1, "Starting parallel encryption of " + str(len(uploadlist)) + " files")
         t0 = time.time()
@@ -327,7 +329,7 @@ class StasEncrypt(object):
 
     # fallback of "Encrypt_and_uploadFTP_parallel" if not sufficient memory:
     # encrypts local files in ftp_path serially and uploads it to FTP
-    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn, fmts):
+    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn, fmts, fsize):
         f = self.encrypt_otf(local_fn)
         if f == -1:
             printlog(0, "Aborting encrypted file upload")
@@ -335,7 +337,7 @@ class StasEncrypt(object):
         local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
         ftp_fn = ftp_path + "/" + local_fn0
         try:
-            res0 = self.STASFTP.upload_file(f, ftp_fn)
+            res0 = self.STASFTP.upload_file(f, ftp_fn, fsize)
             f.close()
             if res0 == -1:
                 raise("FTP upload error")
@@ -383,6 +385,7 @@ def make_ascii(txt):
 def deleteFTPDirectoryRecursive(sftp, ftpdir):
     res, e = sftp.rmd(ftpdir)
     if res == -1 and str(e)[:3] == "550" and str(e)[-5:] == "empty":
+        printlog(1, "Changing to ftp dir " + ftpdir + " and deleting it recursivly ...")
         maindir = sftp.mlsd(ftpdir)
         dirlist = [m for m in maindir]
         for m in dirlist:
@@ -473,7 +476,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             sizeratio = 1
             for ffn0, ffn, fsize, fmdate in ftp_files:
                 fts = fmdate.timestamp()
-                if sfn0 == senc.vignere_decrypt(ffn0):
+                if make_ascii(sfn0) == senc.vignere_decrypt(ffn0):
                     try:
                         sizeratio = abs((int(fsize) - 30) / int(ssize) - 1)
                     except:
@@ -502,7 +505,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             matched = False
             fts = fmdate.timestamp()
             for sfn0, sfn, ssize, sts in dir_file_det:
-                if sfn0 == senc.vignere_decrypt(ffn0):
+                if make_ascii(sfn0) == senc.vignere_decrypt(ffn0):
                     matched = True
                     break
             if (matched and fts > sts):
@@ -518,7 +521,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for ffn0, ffn, fsize, fmdate in ftp_files:
             matched = False
             for sfn0, sfn, ssize, smdate in dir_file_det:
-                if senc.vignere_decrypt(ffn0) == sfn0:
+                if senc.vignere_decrypt(ffn0) == make_ascii(sfn0):
                     matched = True
                     break
             if not matched:
@@ -529,7 +532,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         for sfn0, sfn, ssize, smdate in dir_file_det:
             matched = False
             for ffn0, ffn, fsize, fmdate in ftp_files:
-                if senc.vignere_decrypt(ffn0) == sfn0:
+                if senc.vignere_decrypt(ffn0) == make_ascii(sfn0):
                     matched = True
                     break
             if not matched:
@@ -537,9 +540,10 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                 os.remove(sfn)
     if mode == "backup":
         # Part IIIa. compare FTP dirs to local dirs and delete dirs on FTP which are not local
+        asc_dirs = [make_ascii(d) for d in dir_dirs]
         for fd0 in ftp_dirs:
             fd00 = senc.vignere_decrypt(fd0)
-            if fd00 == -1 or fd00 not in dir_dirs:
+            if fd00 == -1 or fd00 not in asc_dirs:
                 printlog(1, "Directory " + ftp_path + "/" + fd0 + " not found locally, deleting from FTP ...")
                 deleteFTPDirectoryRecursive(sftp, ftp_path + "/" + fd0)
     elif mode == "restore":
@@ -548,7 +552,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             matched = False
             for fd0 in ftp_dirs:
                 fd00 = senc.vignere_decrypt(fd0)
-                if sd0 == fd00:
+                if make_ascii(sd0) == fd00:
                     matched = True
                     break
             if not matched:
@@ -594,6 +598,7 @@ if __name__ == "__main__":
     parser.add_argument('-l', "--local", help='/path/to/local_directory', type=str)
     parser.add_argument('-r', "--remote", help='/remote/directory/on_FTP_server', type=str)
     parser.add_argument('-m', "--mode", help='backup <-> restore', type=str)
+    parser.add_argument('-p', "--parallel", help='yes/no: enables parallel encryption', type=str)
     parser.add_argument('-c', "--config", help='/path/to/config ', type=str)
     args = parser.parse_args()
     if args.local is None:
@@ -618,6 +623,14 @@ if __name__ == "__main__":
         STASCFGPATH = USERHOME + "/.config/stasftp/"
     else:
         STASCFGPATH = args.mode
+    if args.parallel is None or args.parallel.lower() == "no":
+        PARALLEL = False
+    elif args.parallel.lower() == "yes":
+        PARALLEL = True
+    if PARALLEL:
+        printlog(2, "Parallel encryption enabled!")
+    else:
+        printlog(2, "Parallel encryption disabled!")
     # read config file
     try:
         stasftpcfg = configparser.ConfigParser()
