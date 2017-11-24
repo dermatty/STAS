@@ -1,11 +1,2 @@
-data/ftptest
-data/ftptest_restore
-data/stasftp.log
-data/VIGENERE_key
-data/AES_key
-data/stasftp.cfg
-data/docs_restore
-bin/stasbackup.sh
-bin/stasbackup_docs.sh
-bin/stasrestore.sh
-bin/stasrestore_docs.sh
+data/
+bin/
