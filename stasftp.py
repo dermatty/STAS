@@ -24,7 +24,6 @@ FSIZE = 0
 FTRANSFERRED = 0
 OUTPUT_VERBOSITY = 2
 LOG_VERBOSITY = 2
-PARALLEL = False
 
 USERHOME = expanduser("~")
 
@@ -59,17 +58,35 @@ def showdot(block):
 #    handles all the FTP stuff - upload, download, cwd, ...
 class StasFTP(object):
     def __init__(self, host, user, passwd):
+        self.FTP_HOST = host
+        self.FTP_USER = user
+        self.FTP_PASSWD = passwd
+        self.connectftp()
+
+    def connectftp(self):
         try:
-            self.FTP_HOST = host
-            self.FTP_USER = user
-            self.FTP_PASSWD = passwd
             self.FTPS = ftplib.FTP_TLS(host=self.FTP_HOST, user=self.FTP_USER, passwd=self.FTP_PASSWD)
             self.FTPS.prot_p()
+            self.FTP_STATUS = 0
+            self.FTP_ERROR = ""
+            return 0
         except Exception as e:
             self.FTP_STATUS = -1
             self.FTP_ERROR = str(e)
-        self.FTP_STATUS = 0
-        self.FTP_ERROR = "N/A"
+            return
+
+    def goodbye(self):
+        try:
+            self.FTPS.quit()
+            return 0
+        except Exception as e:
+            printlog(0, "Cannot quit FTP, trying to close: " + str(e))
+            try:
+                self.FTPS.close()
+                return 0
+            except Exception as e:
+                printlog(0, "Cannot close,, something ist wrong, exiting: " + str(e))
+                sys.exit()
 
     # modify ftp file timestamp according to local time stamp (fmts)
     def mk_utc_ftp_timestamp(self, fmts, ftp_fn):
@@ -89,12 +106,22 @@ class StasFTP(object):
         global FTRANSFERRED
         FSIZE = fsize
         FTRANSFERRED = 0
-        try:
-            self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
-            return 0
-        except Exception as e:
-            printlog(0, str(e) + ": cannot upload file!")
-            return -1
+        i = 0
+        while True and i < 3:
+            try:
+                self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
+                return 0
+            except Exception as e:
+                printlog(0, str(e) + ": cannot upload file, trying to reconnect!")
+                # reconnect
+                self.goodbye()
+                self.connectftp()
+                if self.FTP_STATUS != 0:
+                    printlog(0, "Cannot reconnect, aborting ...")
+                    sys.exit()
+                i += 1
+        printlog(0, "upload failed after several attempts, aborting ...")
+        sys.exit()
 
     # download binary file to mem/BytesIO
     def download_file(self, ftp_fn, fsize):
@@ -246,7 +273,7 @@ class StasEncrypt(object):
         f.seek(0)
         printlog(2, "---->" + str(time.time() - t0))
         return f
-    
+
     # AES - decrypts ftp file and write it to local file
     def decrypt_otf(self, infile, outfile, fts):
         try:
@@ -290,6 +317,7 @@ class StasEncrypt(object):
     # AES - Encrypts files in ftp_path to memory in parallel if possible and uploads it to ftp
     def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
         global PARALLEL
+        printlog(2, "Parallel encryption " + str(PARALLEL))
         if not uploadlist:
             return 0
         printlog(2, "Checking for sufficient memory for parallel encryption")
@@ -297,7 +325,7 @@ class StasEncrypt(object):
         neededmem = sum([sz for (_, _, _, sz) in uploadlist])
         printlog(2, "Free:" + str(freemem) + ", Needed: " + str(neededmem))
         if neededmem * 1.15 > freemem or not PARALLEL:
-            # printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
+            printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
             for u in uploadlist:
                 fn, ts, _, fs = u
                 res = self.Encrypt_and_uploadtoFTP(ftp_path, fn, ts, fs)
@@ -408,6 +436,7 @@ def remove_last_from_string_recursive(ss, ch):
 
 # main algo: recursively backups local dir to ftp / restores ftp dir to local dir
 def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
+    global PARALLEL
     # Convention: no "/" at end of directory name
     local_path = remove_last_from_string_recursive(local_path, "/")
     ftp_path = remove_last_from_string_recursive(ftp_path, "/")
@@ -470,7 +499,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             printlog(2, "  " + d)
     if mode == "backup":
         # Part Ia. compare local to ftp and update FTP files or upload (if not ye on FTP)
-        uploadlist = []
+        # uploadlist = []
         for sfn0, sfn, ssize, sts in dir_file_det:
             matched = False
             sizeratio = 1
@@ -495,8 +524,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                     sftp.delete(ffn)
                 else:
                     printlog(1, "New upload: adding " + sfn0 + " to FTP upload queue")
-                uploadlist.append((sfn, sts, senc.KEY, ssize))
-        senc.Encrypt_and_uploadFTP_parallel(sftp, ftp_path, uploadlist)
+                senc.Encrypt_and_uploadtoFTP(sftp, ftp_path, sfn, sts, ssize)
     elif mode == "restore":
         # Part Ib. compare FTP to local and update local files or download (if not yet on local)
         downloadlist = []
@@ -598,7 +626,6 @@ if __name__ == "__main__":
     parser.add_argument('-l', "--local", help='/path/to/local_directory', type=str)
     parser.add_argument('-r', "--remote", help='/remote/directory/on_FTP_server', type=str)
     parser.add_argument('-m', "--mode", help='backup <-> restore', type=str)
-    parser.add_argument('-p', "--parallel", help='yes/no: enables parallel encryption', type=str)
     parser.add_argument('-c', "--config", help='/path/to/config ', type=str)
     args = parser.parse_args()
     if args.local is None:
@@ -623,14 +650,6 @@ if __name__ == "__main__":
         STASCFGPATH = USERHOME + "/.config/stasftp/"
     else:
         STASCFGPATH = args.mode
-    if args.parallel is None or args.parallel.lower() == "no":
-        PARALLEL = False
-    elif args.parallel.lower() == "yes":
-        PARALLEL = True
-    if PARALLEL:
-        printlog(2, "Parallel encryption enabled!")
-    else:
-        printlog(2, "Parallel encryption disabled!")
     # read config file
     try:
         stasftpcfg = configparser.ConfigParser()
