@@ -2,9 +2,10 @@ STASFTP
 
 Usage:
 ------
-    stasftp --local /path/to/source --remote /path/on/ftp --mode backup/restore --config /path/to/config
+    stasftp --local /path/to/sourcedir --remote /path/on/ftp --mode backup/restore --config /path/to/config
+            --log /path/to/logfile
     stasftp -l /path/to/source -r /path/on/ftp -m backup/restore -c /path/to/config
-
+            -o /path/to/logfile
     if mode == backup:
             backups --local to --remote doing in-memory on-the-fly encryption
     if mode == restore:
@@ -27,5 +28,3 @@ configfile - stasftp.cfg:
 Licensed under the GPLv3
 
 
-TO DO:
-   - add arg for logging file (-o)
