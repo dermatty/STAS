@@ -32,11 +32,6 @@ USERHOME = expanduser("~")
 # Init Logger
 logger = logging.getLogger("stasftp")
 logger.setLevel(logging.INFO)
-fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-logger.addHandler(fh)
-
 
 # StasFTP.upload_file callback:
 #    prints percentage of upload completed
@@ -634,6 +629,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
 # aux. routine for output and logs
 def printlog(level, msg):
     global OUTPUT_VERBOSITY
+    global logger
     # level 0: critical , level 2: all
     if level <= OUTPUT_VERBOSITY:
         if level == 0:
@@ -655,6 +651,7 @@ if __name__ == "__main__":
     parser.add_argument('-r', "--remote", help='/remote/directory/on_FTP_server', type=str)
     parser.add_argument('-m', "--mode", help='backup <-> restore', type=str)
     parser.add_argument('-c', "--config", help='/path/to/config ', type=str)
+    parser.add_argument('-o', "--log", help='/path/to/logfile', type=str)
     args = parser.parse_args()
     if args.local is None:
         printlog(0, "--local : /path/to/local_directory has to be provided, exiting ...")
@@ -678,6 +675,17 @@ if __name__ == "__main__":
         STASCFGPATH = USERHOME + "/.config/stasftp/"
     else:
         STASCFGPATH = args.mode
+    if args.log is None:
+        fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+    else:
+        try:
+            fh = logging.FileHandler(args.log, mode="w")
+        except:
+            printlog(0, "Cannot set log path, changing to default")
+            fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
     # read config file
     try:
         stasftpcfg = configparser.ConfigParser()
