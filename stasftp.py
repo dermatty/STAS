@@ -29,9 +29,12 @@ GMTCOUNTER = 0
 
 USERHOME = expanduser("~")
 
+EXCLUDELIST = []
+
 # Init Logger
 logger = logging.getLogger("stasftp")
 logger.setLevel(logging.INFO)
+
 
 # StasFTP.upload_file callback:
 #    prints percentage of upload completed
@@ -58,6 +61,7 @@ class StasFTP(object):
         self.FTP_HOST = host
         self.FTP_USER = user
         self.FTP_PASSWD = passwd
+        self.FTPS = None
         self.connectftp()
 
     def connectftp(self):
@@ -132,6 +136,7 @@ class StasFTP(object):
         try:
             self.FTPS.voidcmd("NOOP")
             # printlog(1, "FTP connection ok!")
+            self.FTP_STATUS = 0
             return 0
         except Exception as e:
             pass
@@ -181,7 +186,8 @@ class StasFTP(object):
     def mlsd(self, ftppath):
         self.test_and_reconnect()
         try:
-            return self.FTPS.mlsd(path=ftppath, facts=["name", "type", "perm", "size"])
+            a = self.FTPS.mlsd(path=ftppath, facts=["name", "type", "perm", "size"])
+            return a
         except Exception as e:
             printlog(0, str(e) + ": cannot read ftp directory content")
             return -1
@@ -472,7 +478,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         printlog(2, "Changing FTP dir to " + ftp_path)
         res0 = sftp.cwd(ftp_path)
         if res0 == -1:
-            printlog(1, "FTP:" + ftp_path + " does not exit, creating new dir")
+            printlog(1, "FTP:" + ftp_path + " does not exist, creating new dir")
             res1 = sftp.mkd(ftp_path, os.path.getmtime(local_path))
             if res1 == 0:
                 res2 = sftp.cwd(ftp_path)
@@ -561,7 +567,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                 printlog(1, "Replacment because of newer: adding", ffn0, ftp_ts, " to download queue")
             elif not matched:
                 printlog(1, "New download: adding " + ffn0 + " to FTP download queue")
-        senc.DecryptFTP_and_download(local_path, local_path, ffn, fts, fsize)
+            senc.DecryptFTP_and_download(local_path, ffn, fts, fsize)
     if mode == "backup":
         # Part IIa. compare FTP to local and delete files on FTP which are not on local
         printlog(1, "Deleting locally not existing files on FTP")
@@ -616,6 +622,15 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         dirlist = ftp_dirs
     for dd in dirlist:
         if mode == "backup":
+            tryld1 = local_path + "/" + dd
+            tryld2 = local_path + "/" + dd + "/"
+        else:
+            tryld1 = local_path + "/" + senc.vignere_decrypt(dd)
+            tryld2 = local_path + "/" + senc.vignere_decrypt(dd) + "/"
+        if tryld1 in EXCLUDELIST or tryld2 in EXCLUDELIST:
+            printlog(1, "Excluding local directory: " + tryld1)
+            continue
+        if mode == "backup":
             dd0 = senc.vignere_encrypt(dd)
             for ff in ftp_dirs:
                 if senc.vignere_decrypt(ff) == dd:
@@ -652,6 +667,7 @@ if __name__ == "__main__":
     parser.add_argument('-m', "--mode", help='backup <-> restore', type=str)
     parser.add_argument('-c', "--config", help='/path/to/config ', type=str)
     parser.add_argument('-o', "--log", help='/path/to/logfile', type=str)
+    parser.add_argument('-e', "--exclude", help='/path/to/excludefile', type=str)
     args = parser.parse_args()
     if args.local is None:
         printlog(0, "--local : /path/to/local_directory has to be provided, exiting ...")
@@ -676,16 +692,33 @@ if __name__ == "__main__":
     else:
         STASCFGPATH = args.mode
     if args.log is None:
-        fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+        try:
+            fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+        except:
+            printlog(0, "Please either create default log dir ~/logs or provide -o parameter, exiting")
+            sys.exit()
     else:
         try:
             fh = logging.FileHandler(args.log, mode="w")
         except:
             printlog(0, "Cannot set log path, changing to default")
-            fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+            printlog(0, "Please provide correct -o parameter, exiting")
+            sys.exit()
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     fh.setFormatter(formatter)
     logger.addHandler(fh)
+
+    if args.exclude is None:
+        EXCLUDELIST = []
+    else:
+        try:
+            exf = open(args.exclude, "r")
+            for exf0 in exf:
+                EXCLUDELIST.append(exf0.rstrip())
+            exf.close()
+        except:
+            printlog(0, "Please provide reasonable exclude file, exiting")
+            sys.exit()
     # read config file
     try:
         stasftpcfg = configparser.ConfigParser()
