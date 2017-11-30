@@ -301,20 +301,32 @@ class StasEncrypt(object):
 
     # AES - Opens local file and encrypts it in-mem/to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
+        global STASDIR
         # t0 = time.time()
         try:
             f_in = open(infile, "rb")
             data = f_in.read(-1)
+            data_mb = len(data) / (1024 * 1024)
         except Exception as e:
             printlog(0, str(e) + ": cannot open infile, returning -1")
             return -1
         f_in.close()
         cipher = AES.new(self.KEY, AES.MODE_EAX)
         ciphertext, tag = cipher.encrypt_and_digest(data)
-        f = io.BytesIO()
+        # if data > 250mb:
+        usephysical = False
+        if len(data) * 1.5 > psutil.virtual_memory()[1] or data_mb > 250:
+            f = open(STASDIR + "/tmp/upload.tmp", "wb")
+            usephysical = True
+        else:
+            f = io.BytesIO()
         [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
-        f.seek(0)
         # printlog(2, "---->" + str(time.time() - t0))
+        if usephysical:
+            f.close()
+            f = open(STASDIR + "/tmp/upload.tmp", "rb")
+        else:
+            f.seek(0)
         return f
 
     # AES - decrypts ftp file and write it to local file
@@ -729,7 +741,7 @@ if __name__ == "__main__":
             sys.exit()
     else:
         try:
-            fh = logging.FileHandler(args.log, mode="w")
+            fh = logging.FileHandler(STASDIR + "/log/" + args.log, mode="w")
         except:
             printlog(0, "Cannot set log path, changing to default")
             printlog(0, "Please provide correct -o parameter, exiting")
