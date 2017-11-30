@@ -28,6 +28,7 @@ LOG_VERBOSITY = 2
 GMTCOUNTER = 0
 
 USERHOME = expanduser("~")
+STASDIR = USERHOME + "/.stasftp"
 
 EXCLUDELIST = []
 
@@ -68,6 +69,7 @@ class StasFTP(object):
         try:
             self.FTPS = ftplib.FTP_TLS(host=self.FTP_HOST, user=self.FTP_USER, passwd=self.FTP_PASSWD)
             self.FTPS.prot_p()
+            self.FTPS.set_pasv(True)
             self.FTP_STATUS = 0
             self.FTP_ERROR = ""
             return 0
@@ -107,13 +109,19 @@ class StasFTP(object):
         global FTRANSFERRED
         FSIZE = fsize
         FTRANSFERRED = 0
-        self.test_and_reconnect()
-        try:
-            self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
-            return 0
-        except Exception as e:
-            printlog(0, str(e) + ": cannot upload file / store FTP file")
-        printlog(0, "Upload failed although ftp connection seems to be ok, exiting ...")
+        maxi = 3
+        for i in range(0, 3):
+            self.test_and_reconnect()
+            try:
+                self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
+                return 0
+            except Exception as e:
+                printlog(0, str(e) + ": cannot upload file / store FTP file")
+            s0 = "trying again"
+            if i == maxi - 1:
+                s0 = "aborting!"
+            printlog(0, "Upload failed although ftp connection seemed to be ok, " + s0)
+        printlog(0, "Upload failed after several attempts, exiting")
         sys.exit()
 
     # download binary file to mem/BytesIO
@@ -131,7 +139,7 @@ class StasFTP(object):
         sys.exit()
 
     def test_and_reconnect(self):
-        iterations = 3
+        iterations = 7
         # test FTP for connection
         try:
             self.FTPS.voidcmd("NOOP")
@@ -150,10 +158,12 @@ class StasFTP(object):
         retry = True
         i = 1
         while retry and i <= iterations:
+            printlog(1, "Reconnection try # " + str(i))
             res0 = self.connectftp()
             if res0 == 0:
                 retry = False
             i += 1
+            time.sleep(3)
         if retry:
             printlog(0, "Cannot reconnect to FTP, exiting ...")
             sys.exit()
@@ -658,16 +668,40 @@ def printlog(level, msg):
             logger.info(msg)
 
 
+def os_touch(path):
+    try:
+        with open(path, 'a'):
+            os.utime(path, None)
+    except Exception as e:
+        print(str(e) + " " + path)
+
+
 # main
 if __name__ == "__main__":
+    # check for .stasftp directory and subdirectories
+    if not os.path.isdir(STASDIR):
+        try:
+            os.makedirs(STASDIR)
+            time.sleep(0.1)
+            os.makedirs(STASDIR + "/keys")
+            os.makedirs(STASDIR + "/config")
+            os.makedirs(STASDIR + "/exclude")
+            os.makedirs(STASDIR + "/log")
+            os.makedirs(STASDIR + "/tmp")
+            os_touch(STASDIR + "/config/stasftp.cfg")
+            printlog(1, "Basic directory structure created, now please fill it with content ... ;-)")
+            sys.exit()
+        except Exception as e:
+            printlog(0, str(e) + ": cannot create stasftp directory structure, exiting")
+            sys.exit()
+
     # read arguments -l -r -m -c
     parser = argparse.ArgumentParser(description='AES encrypted FTP backup/restore tool')
     parser.add_argument('-l', "--local", help='/path/to/local_directory', type=str)
     parser.add_argument('-r', "--remote", help='/remote/directory/on_FTP_server', type=str)
     parser.add_argument('-m', "--mode", help='backup <-> restore', type=str)
-    parser.add_argument('-c', "--config", help='/path/to/config ', type=str)
-    parser.add_argument('-o', "--log", help='/path/to/logfile', type=str)
-    parser.add_argument('-e', "--exclude", help='/path/to/excludefile', type=str)
+    parser.add_argument('-o', "--log", help='name of logfile (in ~/.stasftp/logs/)', type=str)
+    parser.add_argument('-e', "--exclude", help='name of excludefile (in ~/.stasftp/exclude/)', type=str)
     args = parser.parse_args()
     if args.local is None:
         printlog(0, "--local : /path/to/local_directory has to be provided, exiting ...")
@@ -687,15 +721,11 @@ if __name__ == "__main__":
         if STASMODE not in ["backup", "restore"]:
             printlog(0, "Mode has to be 'backup' or 'restore', exiting ...")
             sys.exit()
-    if args.config is None:
-        STASCFGPATH = USERHOME + "/.config/stasftp/"
-    else:
-        STASCFGPATH = args.mode
     if args.log is None:
         try:
-            fh = logging.FileHandler(USERHOME + "/logs/stasftp.log", mode="w")
+            fh = logging.FileHandler(STASDIR + "/log/stasftp.log", mode="w")
         except:
-            printlog(0, "Please either create default log dir ~/logs or provide -o parameter, exiting")
+            printlog(0, "Please either create default log dir ~/.stasftp/log and/or provide -o parameter, exiting")
             sys.exit()
     else:
         try:
@@ -712,7 +742,7 @@ if __name__ == "__main__":
         EXCLUDELIST = []
     else:
         try:
-            exf = open(args.exclude, "r")
+            exf = open(STASDIR + "/exclude/" + args.exclude, "r")
             for exf0 in exf:
                 EXCLUDELIST.append(exf0.rstrip())
             exf.close()
@@ -721,6 +751,7 @@ if __name__ == "__main__":
             sys.exit()
     # read config file
     try:
+        STASCFGPATH = STASDIR + "/config/"
         stasftpcfg = configparser.ConfigParser()
         stasftpcfg.read(STASCFGPATH + "stasftp.cfg")
         FTP_HOST = stasftpcfg["CONFIG"]["FTP_HOST"]
@@ -737,7 +768,7 @@ if __name__ == "__main__":
         sys.exit()
     # import / generate AES_key file
     try:
-        KEY_PASSWD = base64.b64decode(open(STASCFGPATH + "AES_key", "rb").read())
+        KEY_PASSWD = base64.b64decode(open(STASDIR + "/keys/AES_key", "rb").read())
         printlog(2, "Read key from AES_key file successfull!")
     except Exception as e:
         if STASMODE == "restore":
@@ -754,7 +785,7 @@ if __name__ == "__main__":
         printlog(2, "No AES_key file found, generated new key and saved in file.")
     # import / generate VIGENERE_key file
     try:
-        encoded_vig_pw = open(STASCFGPATH + "VIGENERE_key", "rb").read()
+        encoded_vig_pw = open(STASDIR + "/keys/VIGENERE_key", "rb").read()
         printlog(2, "Read key from VIGENERE_key file successfull!")
     except Exception as e:
         if STASMODE == "restore":

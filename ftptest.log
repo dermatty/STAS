@@ -1,0 +1,98 @@
+2017-11-30 21:12:56,765 - stasftp - INFO - Read key from AES_key file successfull!
+2017-11-30 21:12:56,765 - stasftp - INFO - Read key from VIGENERE_key file successfull!
+2017-11-30 21:12:57,127 - stasftp - INFO - FTP 'u135615.your-storagebox.de' connected!
+2017-11-30 21:12:57,127 - stasftp - INFO - ---- Syncing FTP dir: /ftptest ----
+2017-11-30 21:12:57,127 - stasftp - INFO - Recursion no. 1
+2017-11-30 21:12:57,128 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest --> FTP:/ftptest
+2017-11-30 21:12:57,128 - stasftp - INFO - Changing FTP dir to /ftptest
+2017-11-30 21:12:57,195 - stasftp - INFO - Reading FTP directory /ftptest
+2017-11-30 21:12:57,974 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest
+2017-11-30 21:12:57,976 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:12:57,977 - stasftp - INFO - 1 of 3 files processed!
+2017-11-30 21:12:57,977 - stasftp - INFO - 2 of 3 files processed!
+2017-11-30 21:12:57,977 - stasftp - INFO - 3 of 3 files processed!
+2017-11-30 21:12:57,978 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:12:57,978 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:12:57,979 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/HHHF2 ----
+2017-11-30 21:12:57,979 - stasftp - INFO - Recursion no. 2
+2017-11-30 21:12:57,979 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2 --> FTP:/ftptest/HHHF2
+2017-11-30 21:12:57,979 - stasftp - INFO - Changing FTP dir to /ftptest/HHHF2
+2017-11-30 21:12:58,048 - stasftp - INFO - 550 /ftptest/HHHF2: No such file or directory: cannot change to ftp_dir /ftptest/HHHF2
+2017-11-30 21:12:58,048 - stasftp - INFO - FTP:/ftptest/HHHF2 does not exist, creating new dir
+2017-11-30 21:12:58,115 - stasftp - INFO - Creating new directory /ftptest/HHHF2
+2017-11-30 21:12:58,183 - stasftp - INFO - Reading FTP directory /ftptest/HHHF2
+2017-11-30 21:12:58,888 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2
+2017-11-30 21:12:58,891 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:12:58,891 - stasftp - INFO - New upload: adding a1 to FTP upload queue
+2017-11-30 21:12:59,365 - stasftp - INFO - Upload of: /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/a1 - success
+2017-11-30 21:12:59,402 - stasftp - INFO - 1 of 2 files processed!
+2017-11-30 21:12:59,403 - stasftp - INFO - New upload: adding a2 to FTP upload queue
+2017-11-30 21:12:59,866 - stasftp - INFO - Upload of: /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/a2 - success
+2017-11-30 21:12:59,906 - stasftp - INFO - 2 of 2 files processed!
+2017-11-30 21:12:59,906 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:12:59,906 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:12:59,907 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/HHHF2/uujycv ----
+2017-11-30 21:12:59,907 - stasftp - INFO - Recursion no. 3
+2017-11-30 21:12:59,907 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi --> FTP:/ftptest/HHHF2/uujycv
+2017-11-30 21:12:59,907 - stasftp - INFO - Changing FTP dir to /ftptest/HHHF2/uujycv
+2017-11-30 21:12:59,976 - stasftp - INFO - 550 /ftptest/HHHF2/uujycv: No such file or directory: cannot change to ftp_dir /ftptest/HHHF2/uujycv
+2017-11-30 21:12:59,977 - stasftp - INFO - FTP:/ftptest/HHHF2/uujycv does not exist, creating new dir
+2017-11-30 21:13:00,048 - stasftp - INFO - Creating new directory /ftptest/HHHF2/uujycv
+2017-11-30 21:13:00,115 - stasftp - INFO - Reading FTP directory /ftptest/HHHF2/uujycv
+2017-11-30 21:13:00,811 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi
+2017-11-30 21:13:00,814 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:13:00,814 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:13:00,815 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:13:00,815 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/HHHF2/uujycv/O3 ----
+2017-11-30 21:13:00,815 - stasftp - INFO - Recursion no. 4
+2017-11-30 21:13:00,815 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A3 --> FTP:/ftptest/HHHF2/uujycv/O3
+2017-11-30 21:13:00,815 - stasftp - INFO - Changing FTP dir to /ftptest/HHHF2/uujycv/O3
+2017-11-30 21:13:00,891 - stasftp - INFO - 550 /ftptest/HHHF2/uujycv/O3: No such file or directory: cannot change to ftp_dir /ftptest/HHHF2/uujycv/O3
+2017-11-30 21:13:00,891 - stasftp - INFO - FTP:/ftptest/HHHF2/uujycv/O3 does not exist, creating new dir
+2017-11-30 21:13:00,966 - stasftp - INFO - Creating new directory /ftptest/HHHF2/uujycv/O3
+2017-11-30 21:13:01,037 - stasftp - INFO - Reading FTP directory /ftptest/HHHF2/uujycv/O3
+2017-11-30 21:13:01,718 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A3
+2017-11-30 21:13:01,721 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:13:01,721 - stasftp - INFO - New upload: adding gg2 to FTP upload queue
+2017-11-30 21:13:02,187 - stasftp - INFO - Upload of: /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A3/gg2 - success
+2017-11-30 21:13:02,227 - stasftp - INFO - 1 of 2 files processed!
+2017-11-30 21:13:02,227 - stasftp - INFO - New upload: adding gg1 to FTP upload queue
+2017-11-30 21:13:02,704 - stasftp - INFO - Upload of: /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A3/gg1 - success
+2017-11-30 21:13:02,743 - stasftp - INFO - 2 of 2 files processed!
+2017-11-30 21:13:02,743 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:13:02,743 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:13:02,744 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/HHHF2/uujycv/O1 ----
+2017-11-30 21:13:02,744 - stasftp - INFO - Recursion no. 4
+2017-11-30 21:13:02,744 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A1 --> FTP:/ftptest/HHHF2/uujycv/O1
+2017-11-30 21:13:02,744 - stasftp - INFO - Changing FTP dir to /ftptest/HHHF2/uujycv/O1
+2017-11-30 21:13:02,817 - stasftp - INFO - 550 /ftptest/HHHF2/uujycv/O1: No such file or directory: cannot change to ftp_dir /ftptest/HHHF2/uujycv/O1
+2017-11-30 21:13:02,817 - stasftp - INFO - FTP:/ftptest/HHHF2/uujycv/O1 does not exist, creating new dir
+2017-11-30 21:13:02,892 - stasftp - INFO - Creating new directory /ftptest/HHHF2/uujycv/O1
+2017-11-30 21:13:02,963 - stasftp - INFO - Reading FTP directory /ftptest/HHHF2/uujycv/O1
+2017-11-30 21:13:03,639 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A1
+2017-11-30 21:13:03,642 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:13:03,642 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:13:03,642 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:13:03,643 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/HHHF2/uujycv/O2 ----
+2017-11-30 21:13:03,643 - stasftp - INFO - Recursion no. 4
+2017-11-30 21:13:03,643 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A2 --> FTP:/ftptest/HHHF2/uujycv/O2
+2017-11-30 21:13:03,643 - stasftp - INFO - Changing FTP dir to /ftptest/HHHF2/uujycv/O2
+2017-11-30 21:13:03,715 - stasftp - INFO - 550 /ftptest/HHHF2/uujycv/O2: No such file or directory: cannot change to ftp_dir /ftptest/HHHF2/uujycv/O2
+2017-11-30 21:13:03,716 - stasftp - INFO - FTP:/ftptest/HHHF2/uujycv/O2 does not exist, creating new dir
+2017-11-30 21:13:03,790 - stasftp - INFO - Creating new directory /ftptest/HHHF2/uujycv/O2
+2017-11-30 21:13:03,861 - stasftp - INFO - Reading FTP directory /ftptest/HHHF2/uujycv/O2
+2017-11-30 21:13:04,547 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/TEST2/grummi/A2
+2017-11-30 21:13:04,550 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:13:04,550 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:13:04,551 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:13:04,551 - stasftp - INFO - ---- Syncing FTP dir: /ftptest/???SWT ----
+2017-11-30 21:13:04,551 - stasftp - INFO - Recursion no. 2
+2017-11-30 21:13:04,552 - stasftp - INFO - Syncing local:/media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/ÄÄÄGGG --> FTP:/ftptest/???SWT
+2017-11-30 21:13:04,552 - stasftp - INFO - Changing FTP dir to /ftptest/???SWT
+2017-11-30 21:13:04,618 - stasftp - INFO - Reading FTP directory /ftptest/???SWT
+2017-11-30 21:13:05,338 - stasftp - INFO - Reading local directory /media/nfs/NFS_Projekte/GIT/STAS/data/ftptest/ÄÄÄGGG
+2017-11-30 21:13:05,341 - stasftp - INFO - Uploading new/modified content ...
+2017-11-30 21:13:05,342 - stasftp - INFO - 1 of 1 files processed!
+2017-11-30 21:13:05,342 - stasftp - INFO - Deleting locally not existing files on FTP
+2017-11-30 21:13:05,342 - stasftp - INFO - Deleting locally not exisiting dirs on FTP
+2017-11-30 21:13:05,342 - stasftp - INFO - Sync completed in 8.215195655822754 sec.!
