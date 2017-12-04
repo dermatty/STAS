@@ -32,6 +32,8 @@ STASDIR = USERHOME + "/.stasftp"
 
 EXCLUDELIST = []
 
+UNENC_TOKEN = ".megx01"
+
 # Init Logger
 logger = logging.getLogger("stasftp")
 logger.setLevel(logging.INFO)
@@ -302,32 +304,36 @@ class StasEncrypt(object):
     # AES - Opens local file and encrypts it in-mem/to BytesIO, returns file descriptor
     def encrypt_otf(self, infile):
         global STASDIR
+        global UNENC_TOKEN
         # t0 = time.time()
         try:
             f_in = open(infile, "rb")
             data = f_in.read(-1)
-            data_mb = len(data) / (1024 * 1024)
         except Exception as e:
             printlog(0, str(e) + ": cannot open infile, returning -1")
             return -1
-        f_in.close()
-        cipher = AES.new(self.KEY, AES.MODE_EAX)
-        ciphertext, tag = cipher.encrypt_and_digest(data)
-        # if data > 250mb:
-        usephysical = False
-        if len(data) * 1.5 > psutil.virtual_memory()[1] or data_mb > 250:
-            f = open(STASDIR + "/tmp/upload.tmp", "wb")
-            usephysical = True
-        else:
+        try:
+            f_in.close()
+            cipher = AES.new(self.KEY, AES.MODE_EAX)
+            ciphertext, tag = cipher.encrypt_and_digest(data)
+            printlog(2, "File encrypted")
             f = io.BytesIO()
-        [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
-        # printlog(2, "---->" + str(time.time() - t0))
-        if usephysical:
-            f.close()
-            f = open(STASDIR + "/tmp/upload.tmp", "rb")
-        else:
+            [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
+            printlog(2, "File written!")
             f.seek(0)
-        return f
+            return f, ""
+        except Exception as e:
+            printlog(1, str(e) + ": Error in encryption, will upload unencrypted file - " + UNENC_TOKEN)
+            try:
+                f = open(STASDIR + "/tmp/upload.tmp", "wb")
+                f.write(data)
+                f.flush()
+                f.close()
+                f = open(STASDIR + "/tmp/upload.tmp", "rb")
+                return f, UNENC_TOKEN
+            except Exception as e:
+                printlog(0, str(e) + ": cannot save temp file!")
+                return -1, ""
 
     # AES - decrypts ftp file and write it to local file
     def decrypt_otf(self, infile, outfile, fts):
@@ -349,6 +355,7 @@ class StasEncrypt(object):
     # AES - Downloads file from ftp to memory, decrypts it and stores it locally
     # (local_path, local_path, ffn, fts, fsize)
     def DecryptFTP_and_download(self, local_path, fn, fts, fsize):
+        global UNENC_TOKEN
         printlog(2, "Downloading from FTP to RAM: " + fn)
         f_encrypted = self.STASFTP.download_file(fn, fsize)
         if f_encrypted == -1:
@@ -357,6 +364,22 @@ class StasEncrypt(object):
         else:
             printlog(1, "Download of: " + fn + " - success")
         fn0 = self.vignere_decrypt(fn.split("/")[-1])
+        if fn0[0:-len(UNENC_TOKEN)] == UNENC_TOKEN:
+            printlog(2, "No decryption, file was too large for encrypted upload!")
+            try:
+                local_fn = local_path + "/" + fn0[:-len(UNENC_TOKEN)]
+                f_out = open(local_fn, "wb")
+                f_encrypted.seek(0)
+                f_out.write(f_encrypted.read(-1))
+                f_out.flush()
+                os.utime(local_fn, (fts, fts))
+                f_encrypted.close()
+                f_out.close()
+                printlog(1, "Unencrypted download of file " + local_fn + " successfull!")
+                return
+            except Exception as e:
+                printlog(0, str(e) + ": Cannot download unencrypted file!")
+                return
         local_fn = local_path + "/" + fn0
         printlog(2, "Decrypting from RAM and saving: " + local_fn)
         res0 = self.decrypt_otf(f_encrypted, local_fn, fts)
@@ -367,7 +390,7 @@ class StasEncrypt(object):
             printlog(0, "Cannot decrypt/save " + fn + "!")
 
     # AES - Encrypts files in ftp_path to memory in parallel if possible and uploads it to ftp
-    def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
+    '''def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
         global PARALLEL
         printlog(2, "Parallel encryption " + str(PARALLEL))
         if not uploadlist:
@@ -405,15 +428,17 @@ class StasEncrypt(object):
                     raise("FTP MFMT error")
             except Exception as e:
                 printlog(0, str(e) + ": upload/MFMT to FTP failed!")
-        return 0
+        return 0'''
 
     # fallback of "Encrypt_and_uploadFTP_parallel" if not sufficient memory:
     # encrypts local files in ftp_path serially and uploads it to FTP
-    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn, fmts, fsize):
-        f = self.encrypt_otf(local_fn)
+    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn1, fmts, fsize):
+        local_fn = local_fn1
+        f, suffix = self.encrypt_otf(local_fn)
         if f == -1:
             printlog(0, "Aborting encrypted file upload")
             return -1
+        local_fn = local_fn + suffix
         local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
         ftp_fn = ftp_path + "/" + local_fn0
         try:
@@ -426,14 +451,16 @@ class StasEncrypt(object):
             res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
             if res0 == -1:
                 raise("FTP MFMT error")
+            sys.exit()
             return 0
         except Exception as e:
             printlog(0, str(e) + ": upload/MFMT to FTP failed!")
+            sys.exit()
             return -1
 
 
 # this is called by parallel processing pool for "Encrypt_and_uploadFTP_parallel" above
-def encrypt_otf_standalone(param):
+'''def encrypt_otf_standalone(param):
         infile, timestamp, key, fsize = param
         try:
             f_in = open(infile, "rb")
@@ -447,7 +474,7 @@ def encrypt_otf_standalone(param):
         f = io.BytesIO()
         [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
         f.seek(0)
-        return f, infile, timestamp, fsize
+        return f, infile, timestamp, fsize'''
 
 
 # removes non-ascii characters from a string
@@ -489,6 +516,7 @@ def remove_last_from_string_recursive(ss, ch):
 # main algo: recursively backups local dir to ftp / restores ftp dir to local dir
 def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
     global GMTCOUNTER
+    global UNENC_TOKEN
     # Convention: no "/" at end of directory name
     local_path = remove_last_from_string_recursive(local_path, "/")
     ftp_path = remove_last_from_string_recursive(ftp_path, "/")
@@ -551,14 +579,15 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             sizeratio = 1
             for ffn0, ffn, fsize, fmdate, vd_ffn0 in ftp_files:
                 fts = fmdate.timestamp()
-                if make_ascii(sfn0) == vd_ffn0:
+                masfn0 = make_ascii(sfn0)
+                if masfn0 == vd_ffn0 or vd_ffn0[0:-len(UNENC_TOKEN)] == masfn0:
                     try:
                         sizeratio = abs((int(fsize) - 30) / int(ssize) - 1)
                     except:
                         sizeratio = 0
                     matched = True
                     break
-            if (matched and sts > fts) or (not matched) or (matched and sizeratio > 0.2 and ssize > 1000):
+            if (matched and abs(sts - fts) > 5) or (not matched) or (matched and sizeratio > 0.2 and ssize > 1000):
                 if (matched and sizeratio > 0.2 and ssize > 1000):
                     source_ts = datetime.datetime.fromtimestamp(sts)
                     printlog(1, "Incomplete file on FTP: adding " + sfn0 + " (" + str(source_ts) + ") to upload queue")
@@ -581,22 +610,26 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
             matched = False
             fts = fmdate.timestamp()
             for sfn0, sfn, ssize, sts in dir_file_det:
-                if make_ascii(sfn0) == vd_ffn0:
+                masfn0 = make_ascii(sfn0)
+                if vd_ffn0 == masfn0 or vd_ffn0[0:-len(UNENC_TOKEN)] == masfn0:
                     matched = True
                     break
-            if (matched and fts > sts):
+            if (matched and abs(fts - sts) > 5):
                 ftp_ts = datetime.datetime.fromtimestamp(fts)
-                printlog(1, "Replacment because of newer: adding", ffn0, ftp_ts, " to download queue")
+                sys.exit()
+                printlog(1, "Replacment because of newer: adding " + ffn0 + str(ftp_ts) + " to download queue")
+                senc.DecryptFTP_and_download(local_path, ffn, fts, fsize)
             elif not matched:
                 printlog(1, "New download: adding " + ffn0 + " to FTP download queue")
-            senc.DecryptFTP_and_download(local_path, ffn, fts, fsize)
+                senc.DecryptFTP_and_download(local_path, ffn, fts, fsize)
     if mode == "backup":
         # Part IIa. compare FTP to local and delete files on FTP which are not on local
         printlog(1, "Deleting locally not existing files on FTP")
         for ffn0, ffn, fsize, fmdate, vd_ffn0 in ftp_files:
             matched = False
             for sfn0, sfn, ssize, smdate in dir_file_det:
-                if vd_ffn0 == make_ascii(sfn0):
+                masfn0 = make_ascii(sfn0)
+                if vd_ffn0 == masfn0 or vd_ffn0[0:-len(UNENC_TOKEN)] == masfn0:
                     matched = True
                     break
             if not matched:
@@ -607,8 +640,9 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         printlog(1, "Deleting remotely not existing files on local drive")
         for sfn0, sfn, ssize, smdate in dir_file_det:
             matched = False
+            masfn0 = make_ascii(sfn0)
             for ffn0, ffn, fsize, fmdate, vd_ffn0 in ftp_files:
-                if vd_ffn0 == make_ascii(sfn0):
+                if vd_ffn0 == masfn0 or vd_ffn0[0:-len(UNENC_TOKEN)] == masfn0:
                     matched = True
                     break
             if not matched:
@@ -618,7 +652,6 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         # Part IIIa. compare FTP dirs to local dirs and delete dirs on FTP which are not local
         printlog(2, "Deleting locally not exisiting dirs on FTP")
         asc_dirs = [make_ascii(d) for d in dir_dirs]
-        
         for fd0 in ftp_dirs:
             fd00 = senc.vignere_decrypt(fd0)
             if fd00 == -1 or fd00 not in asc_dirs:
