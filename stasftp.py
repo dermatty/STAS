@@ -11,13 +11,13 @@ from Crypto.Protocol.KDF import PBKDF2
 from Crypto import Random
 import io
 import time
-from multiprocessing import Pool, cpu_count
 import psutil
 import argparse
 import base64
 import shutil
 import logging
 import logging.handlers
+import threading
 
 # globals
 FSIZE = 0
@@ -33,6 +33,8 @@ STASDIR = USERHOME + "/.stasftp"
 EXCLUDELIST = []
 
 UNENC_TOKEN = ".megx01"
+
+RUNNING = False
 
 # Init Logger
 logger = logging.getLogger("stasftp")
@@ -106,13 +108,13 @@ class StasFTP(object):
             return -1
 
     # upload binary file
-    def upload_file(self, f, ftp_fn, fsize):
+    '''def upload_file(self, f, ftp_fn, fsize):
         global FSIZE
         global FTRANSFERRED
         FSIZE = fsize
         FTRANSFERRED = 0
         maxi = 3
-        for i in range(0, 3):
+        for i in range(0, maxi):
             self.test_and_reconnect()
             try:
                 self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
@@ -124,21 +126,155 @@ class StasFTP(object):
                 s0 = "aborting!"
             printlog(0, "Upload failed although ftp connection seemed to be ok, " + s0)
         printlog(0, "Upload failed after several attempts, exiting")
-        sys.exit()
+        sys.exit()'''
+
+    def upload_file(self, f, ftp_fn, fsize):
+        global RUNNING
+        self.test_and_reconnect()
+        try:
+            self.FTPS.voidcmd('TYPE I')
+        except:
+            pass
+        try:
+            sock = self.FTPS.transfercmd('STOR ' + ftp_fn)
+        except Exception as e:
+            printlog(0, str(e) + ": cannot initiate upload connection!")
+            sys.exit()
+
+        def background_upload(sock, fp, res_t):
+            global OUTPUT_VERBOSITY
+            global RUNNING
+            ftransferred = 0
+            blocksize = 8192
+            RUNNING = True
+            while RUNNING:
+                try:
+                    block = fp.read(blocksize)
+                    if not block:
+                        RUNNING = False
+                        break
+                    sock.sendall(block)
+                except Exception as e:
+                    printlog(0, str(e) + ": error in infile read or sendall to ftp")
+                    res_t.append(-1)
+                    RUNNING = False
+                    break
+                if OUTPUT_VERBOSITY < 1:
+                    continue
+                ftransferred += blocksize
+                if fsize == 0:
+                    perc = 1
+                else:
+                    perc = ftransferred/fsize
+                if perc > 1:
+                    perc = 1
+                print("\r", int(perc * 100), "% uploaded", end="")
+                if perc >= 1:
+                    print()
+            sock.close()
+            res_t.append(0)
+
+        res_thread = []
+        t = threading.Thread(target=background_upload, args=(sock, f, res_thread, ))
+        t.start()
+        while t.is_alive():
+            t.join(60)
+            try:
+                self.FTPS.voidcmd('NOOP')
+            except Exception as e:
+                RUNNING = False
+                time.sleep(1)
+                printlog(0, str(e) + ": cannot keepalive FTP connection during upload, killing thread and aborting ...")
+                sys.exit()
+        return res_thread[-1], self.FTPS.voidresp()
 
     # download binary file to mem/BytesIO
-    def download_file(self, ftp_fn, fsize):
+    '''def download_file(self, ftp_fn, fsize):
         # downloads file to bytesIO
+        maxi = 3
+        for i in range(0, maxi):
+            self.test_and_reconnect()
+            try:
+                f = io.BytesIO()
+                print("1")
+                self.FTPS.retrbinary("RETR " + ftp_fn, f.write, blocksize=1024)
+                print("2")
+                f.seek(0)
+                print("3")
+                return f
+            except Exception as e:
+                f.close()
+                printlog(0, str(e) + ": cannot download / store FTP file " + ftp_fn)
+            s0 = "trying again"
+            if i == maxi - 1:
+                s0 = "aborting!"
+            printlog(0, "Download failed although ftp connection seemed to be ok, " + s0)
+        printlog(0, "Download failed although ftp connection seems to be ok, exiting ...")
+        sys.exit()'''
+
+    def download_file(self, ftp_fn, fsize):
+        global RUNNING
         self.test_and_reconnect()
         f = io.BytesIO()
         try:
-            self.FTPS.retrbinary("RETR " + ftp_fn, f.write)
-            f.seek(0)
-            return f
+            self.FTPS.voidcmd("TYPE I")
+        except:
+            pass
+        try:
+            sock = self.FTPS.transfercmd('RETR ' + ftp_fn)
         except Exception as e:
-            printlog(0, str(e) + ": cannot download / store FTP file " + ftp_fn)
-        printlog(0, "Download failed although ftp connection seems to be ok, exiting ...")
-        sys.exit()
+            printlog(0, str(e) + ": cannot initiate download connection!")
+            sys.exit()
+
+        def background_download(sock, res_t):
+            global OUTPUT_VERBOSITY
+            global RUNNING
+            RUNNING = True
+            ftransferred = 0
+            blocksize = 8192
+            while RUNNING:
+                try:
+                    block = sock.recv(blocksize)
+                    if not block:
+                        RUNNING = False
+                        break
+                    f.write(block)
+                except Exception as e:
+                    printlog(0, str(e) + ": error in outfile write or recv from ftp")
+                    res_t.append(-1)
+                    RUNNING = False
+                    break
+                # print fortschritt
+                if OUTPUT_VERBOSITY < 1:
+                    continue
+                ftransferred += blocksize
+                if fsize == 0:
+                    perc = 1
+                else:
+                    perc = ftransferred/int(fsize)
+                if perc > 1:
+                    perc = 1
+                print("\r", int(perc * 100), "% downloaded", end="")
+                if perc >= 1:
+                    print()
+            sock.close()
+            res_t.append(0)
+
+        res_thread = []
+        t = threading.Thread(target=background_download, args=(sock, res_thread, ))
+        t.start()
+        while t.is_alive():
+            t.join(60)
+            try:
+                self.FTPS.voidcmd('NOOP')
+            except Exception as e:
+                RUNNING = False
+                time.sleep(1)
+                printlog(0, str(e) + ": cannot keepalive FTP connection during download, killing thread and aborting ...")
+                sys.exit()
+        if res_thread[-1] == -1:
+            f = -1
+        return f, self.FTPS.voidresp()
 
     def test_and_reconnect(self):
         iterations = 7
@@ -164,8 +300,9 @@ class StasFTP(object):
             res0 = self.connectftp()
             if res0 == 0:
                 retry = False
-            i += 1
-            time.sleep(3)
+            else:
+                i += 1
+                time.sleep(3)
         if retry:
             printlog(0, "Cannot reconnect to FTP, exiting ...")
             sys.exit()
@@ -239,6 +376,7 @@ class StasFTP(object):
     # get mod. time of ftp file as datetime object
     def get_modification_time(self, ftp_fn):
         global GMTCOUNTER
+        self.test_and_reconnect()
         try:
             ftp_mdtm = self.FTPS.sendcmd("MDTM " + ftp_fn)
             ret0 = self.makemtime(ftp_mdtm)
@@ -314,12 +452,12 @@ class StasEncrypt(object):
             return -1
         try:
             f_in.close()
+            printlog(2, "Encrypting " + infile)
             cipher = AES.new(self.KEY, AES.MODE_EAX)
             ciphertext, tag = cipher.encrypt_and_digest(data)
-            printlog(2, "File encrypted")
+            printlog(2, "Encryption completed!")
             f = io.BytesIO()
             [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
-            printlog(2, "File written!")
             f.seek(0)
             return f, ""
         except Exception as e:
@@ -357,7 +495,7 @@ class StasEncrypt(object):
     def DecryptFTP_and_download(self, local_path, fn, fts, fsize):
         global UNENC_TOKEN
         printlog(2, "Downloading from FTP to RAM: " + fn)
-        f_encrypted = self.STASFTP.download_file(fn, fsize)
+        f_encrypted, voidresp = self.STASFTP.download_file(fn, fsize)
         if f_encrypted == -1:
             printlog(0, "Cannot download from FTP: " + fn + ", skipping")
             return
@@ -442,7 +580,7 @@ class StasEncrypt(object):
         local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
         ftp_fn = ftp_path + "/" + local_fn0
         try:
-            res0 = self.STASFTP.upload_file(f, ftp_fn, fsize)
+            res0, voidresp = self.STASFTP.upload_file(f, ftp_fn, fsize)
             f.close()
             if res0 == -1:
                 raise("FTP upload error")
@@ -451,7 +589,6 @@ class StasEncrypt(object):
             res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
             if res0 == -1:
                 raise("FTP MFMT error")
-            sys.exit()
             return 0
         except Exception as e:
             printlog(0, str(e) + ": upload/MFMT to FTP failed!")
