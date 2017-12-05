@@ -502,7 +502,7 @@ class StasEncrypt(object):
         else:
             printlog(1, "Download of: " + fn + " - success")
         fn0 = self.vignere_decrypt(fn.split("/")[-1])
-        if fn0[0:-len(UNENC_TOKEN)] == UNENC_TOKEN:
+        if fn0[-len(UNENC_TOKEN):] == UNENC_TOKEN:
             printlog(2, "No decryption, file was too large for encrypted upload!")
             try:
                 local_fn = local_path + "/" + fn0[:-len(UNENC_TOKEN)]
