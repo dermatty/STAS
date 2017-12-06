@@ -36,6 +36,9 @@ UNENC_TOKEN = ".megx01"
 
 RUNNING = False
 
+MAXTRY = 5
+SLEEPTRY = 15
+
 # Init Logger
 logger = logging.getLogger("stasftp")
 logger.setLevel(logging.INFO)
@@ -71,7 +74,7 @@ class StasFTP(object):
 
     def connectftp(self):
         try:
-            self.FTPS = ftplib.FTP_TLS(host=self.FTP_HOST, user=self.FTP_USER, passwd=self.FTP_PASSWD)
+            self.FTPS = ftplib.FTP_TLS(host=self.FTP_HOST, user=self.FTP_USER, passwd=self.FTP_PASSWD, timeout=30)
             self.FTPS.prot_p()
             self.FTPS.set_pasv(True)
             self.FTP_STATUS = 0
@@ -80,7 +83,7 @@ class StasFTP(object):
         except Exception as e:
             self.FTP_STATUS = -1
             self.FTP_ERROR = str(e)
-            return -1
+            return -2
 
     def goodbye(self):
         try:
@@ -93,7 +96,47 @@ class StasFTP(object):
                 return 0
             except Exception as e:
                 printlog(0, "Cannot close, something ist wrong: " + str(e))
-                return -1
+                return -2
+
+    def try_reconnect(self, maxtry):
+        global SLEEPTRY
+        res0 = -1
+        for j in range(0, maxtry):
+            self.goodbye()
+            printlog(1, "Performing reconnection attempt #" + str(j + 1))
+            res0 = self.connectftp()
+            if res0 == 0:
+                try:
+                    self.FTPS.voidcmd("NOOP")
+                    printlog(1, "Reconnection attempt #" + str(j + 1) + " - success!")
+                    return
+                except:
+                    if j == maxtry - 1:
+                        printlog(0, "All reconnection attempts failed, exiting ...")
+                        sys.exit()
+            elif j == maxtry-1:
+                printlog(0, "All reconnection attempts failed, exiting ...")
+                sys.exit()
+            printlog(1, "Reconnection failure, waiting 15 sec for next connection attempt!")
+            time.sleep(SLEEPTRY)
+
+    # wrapper around all ftp functions
+    def ftp_wrapper(self, f):
+        global MAXTRY
+        for i in range(MAXTRY):
+            # execute command
+            res0 = f()        # -2 ftp error, != -2 --> return regularly else retry
+            # if non-ftp error return!
+            if res0 != -2:
+                break
+            # only try to reconnect with error=-2
+            printlog(0, "Cannot complete command, FTP error!")
+            if i != MAXTRY-1:
+                self.try_reconnect(MAXTRY)
+            else:
+                printlog(0, "All reconnection attempts failed, exiting ...")
+                sys.exit()
+        return res0
 
     # modify ftp file timestamp according to local time stamp (fmts)
     def mk_utc_ftp_timestamp(self, fmts, ftp_fn):
@@ -105,41 +148,22 @@ class StasFTP(object):
             return mfmtstr
         except Exception as e:
             printlog(0, str(e) + ": cannot modify FTP timestamp!")
-            return -1
+            return -2
 
     # upload binary file
-    '''def upload_file(self, f, ftp_fn, fsize):
-        global FSIZE
-        global FTRANSFERRED
-        FSIZE = fsize
-        FTRANSFERRED = 0
-        maxi = 3
-        for i in range(0, maxi):
-            self.test_and_reconnect()
-            try:
-                self.FTPS.storbinary("STOR " + ftp_fn, f, callback=showdot, blocksize=1024)
-                return 0
-            except Exception as e:
-                printlog(0, str(e) + ": cannot upload file / store FTP file")
-            s0 = "trying again"
-            if i == maxi - 1:
-                s0 = "aborting!"
-            printlog(0, "Upload failed although ftp connection seemed to be ok, " + s0)
-        printlog(0, "Upload failed after several attempts, exiting")
-        sys.exit()'''
-
     def upload_file(self, f, ftp_fn, fsize):
         global RUNNING
-        self.test_and_reconnect()
+        # sign- for binary file
         try:
             self.FTPS.voidcmd('TYPE I')
         except:
-            pass
+            return -2
+        # init socket
         try:
             sock = self.FTPS.transfercmd('STOR ' + ftp_fn)
         except Exception as e:
             printlog(0, str(e) + ": cannot initiate upload connection!")
-            sys.exit()
+            return -2
 
         def background_upload(sock, fp, res_t):
             global OUTPUT_VERBOSITY
@@ -148,15 +172,23 @@ class StasFTP(object):
             blocksize = 8192
             RUNNING = True
             while RUNNING:
+                # read from infile
                 try:
                     block = fp.read(blocksize)
-                    if not block:
-                        RUNNING = False
-                        break
+                except Exception as e:
+                    printlog(1, str(e) + ": error in infile read")
+                    res_t.append(-1)
+                    RUNNING = False
+                    break
+                if not block:
+                    RUNNING = False
+                    break
+                # upload via socket
+                try:
                     sock.sendall(block)
                 except Exception as e:
-                    printlog(0, str(e) + ": error in infile read or sendall to ftp")
-                    res_t.append(-1)
+                    printlog(0, str(e) + ": error in sendall to ftp")
+                    res_t.append(-2)
                     RUNNING = False
                     break
                 if OUTPUT_VERBOSITY < 1:
@@ -184,47 +216,29 @@ class StasFTP(object):
             except Exception as e:
                 RUNNING = False
                 time.sleep(1)
-                printlog(0, str(e) + ": cannot keepalive FTP connection during upload, killing thread and aborting ...")
-                sys.exit()
-        return res_thread[-1], self.FTPS.voidresp()
+                printlog(0, str(e) + ": cannot keepalive FTP connection during upload, killing keepalive thread")
+                return -2
+        try:
+            self.FTPS.voidresp()
+        except:
+            return -2
+        return res_thread[-1]
 
-    # download binary file to mem/BytesIO
-    '''def download_file(self, ftp_fn, fsize):
-        # downloads file to bytesIO
-        maxi = 3
-        for i in range(0, maxi):
-            self.test_and_reconnect()
-            try:
-                f = io.BytesIO()
-                print("1")
-                self.FTPS.retrbinary("RETR " + ftp_fn, f.write, blocksize=1024)
-                print("2")
-                f.seek(0)
-                print("3")
-                return f
-            except Exception as e:
-                f.close()
-                printlog(0, str(e) + ": cannot download / store FTP file " + ftp_fn)
-            s0 = "trying again"
-            if i == maxi - 1:
-                s0 = "aborting!"
-            printlog(0, "Download failed although ftp connection seemed to be ok, " + s0)
-        printlog(0, "Download failed although ftp connection seems to be ok, exiting ...")
-        sys.exit()'''
-
+    # download binary file
     def download_file(self, ftp_fn, fsize):
         global RUNNING
-        self.test_and_reconnect()
         f = io.BytesIO()
+        # signature for binary file
         try:
             self.FTPS.voidcmd("TYPE I")
         except:
-            pass
+            return -2
+        # init socket
         try:
             sock = self.FTPS.transfercmd('RETR ' + ftp_fn)
         except Exception as e:
             printlog(0, str(e) + ": cannot initiate download connection!")
-            sys.exit()
+            return -2
 
         def background_download(sock, res_t):
             global OUTPUT_VERBOSITY
@@ -233,14 +247,22 @@ class StasFTP(object):
             ftransferred = 0
             blocksize = 8192
             while RUNNING:
+                # receive socket from ftp
                 try:
                     block = sock.recv(blocksize)
                     if not block:
                         RUNNING = False
                         break
+                except Exception as e:
+                    printlog(0, str(e) + ": error in recv from ftp")
+                    res_t.append(-2)
+                    RUNNING = False
+                    break
+                # write file
+                try:
                     f.write(block)
                 except Exception as e:
-                    printlog(0, str(e) + ": error in outfile write or recv from ftp")
+                    printlog(0, str(e) + ": error in outfile write")
                     res_t.append(-1)
                     RUNNING = False
                     break
@@ -270,96 +292,69 @@ class StasFTP(object):
             except Exception as e:
                 RUNNING = False
                 time.sleep(1)
-                printlog(0, str(e) + ": cannot keepalive FTP connection during download, killing thread and aborting ...")
-                sys.exit()
+                printlog(0, str(e) + ": cannot keepalive FTP connection during download, killing thread")
+                return -2
         if res_thread[-1] == -1:
             f = -1
-        return f, self.FTPS.voidresp()
-
-    def test_and_reconnect(self):
-        iterations = 7
-        # test FTP for connection
         try:
-            self.FTPS.voidcmd("NOOP")
-            # printlog(1, "FTP connection ok!")
-            self.FTP_STATUS = 0
-            return 0
-        except Exception as e:
-            pass
-        # if connection down, goodbye just to make sure
-        printlog(0, "FTP connection down, trying to reconnect!")
-        try:
-            self.goodbye()
+            self.FTPS.voidresp()
         except:
-            pass
-        # try to reconnect, if not successfull -> sys.exit()
-        retry = True
-        i = 1
-        while retry and i <= iterations:
-            printlog(1, "Reconnection try # " + str(i))
-            res0 = self.connectftp()
-            if res0 == 0:
-                retry = False
-            else:
-                i += 1
-                time.sleep(3)
-        if retry:
-            printlog(0, "Cannot reconnect to FTP, exiting ...")
-            sys.exit()
-        printlog(0, "Reconnect to FTP successfull")
-        return 0
+            return -2
+        return f
 
     # change to ftp dir
     def cwd(self, ftpdir):
-        self.test_and_reconnect()
         try:
             self.FTPS.cwd(ftpdir)
             return 0
         except Exception as e:
-            printlog(1, str(e) + ": cannot change to ftp_dir " + ftpdir)
-            return -1
+            printlog(1, str(e) + ": cannot change to ftp dir " + ftpdir)
+            if str(type(e).__name__) == "error_perm":
+                return -1
+            return -2
 
     # create new ftp dir
     def mkd(self, ftpdir, fmts):
-        self.test_and_reconnect()
         try:
             self.FTPS.mkd(ftpdir)
             # mfmtstr = self.mk_utc_ftp_timestamp(fmts, ftpdir + "/")
             printlog(2, "Creating new directory " + ftpdir)    # + " : " + mfmtstr)
             return 0
         except Exception as e:
-            printlog(0, str(e) + " : exiting ...")
-            return -1
+            printlog(0, str(e) + " : cannot make ftp dir")
+            return -2
 
     # get ftp dir contents, namely name, type, perm and size
     def mlsd(self, ftppath):
-        self.test_and_reconnect()
         try:
             a = self.FTPS.mlsd(path=ftppath, facts=["name", "type", "perm", "size"])
             return a
         except Exception as e:
-            printlog(0, str(e) + ": cannot read ftp directory content")
-            return -1
+            printlog(0, str(e) + ": cannot read ftp dir contents")
+            return -2
 
     # delete file from ftp
     def delete(self, ftp_fn):
-        self.test_and_reconnect()
         try:
             self.FTPS.delete(ftp_fn)
             return 0
         except Exception as e:
             printlog(0, str(e) + ": cannot delete file from FTP")
-            return -1
+            print(str(type(e).__name__))
+            if str(type(e).__name__) == "error_perm":
+                return -1
+            return -2
 
     # remove dir from ftp
     def rmd(self, ftpdir):
-        self.test_and_reconnect()
         try:
             self.FTPS.rmd(ftpdir)
             return 0, ""
         except Exception as e:
             printlog(0, str(e) + ": cannot delete directory from FTP")
-            return -1, str(e)
+            if str(type(e).__name__) == "error_perm":
+                return -1
+            return -2
 
     # convert timestamp of ftp to datetime object
     def makemtime(self, ftp_mdtm):
@@ -376,14 +371,15 @@ class StasFTP(object):
     # get mod. time of ftp file as datetime object
     def get_modification_time(self, ftp_fn):
         global GMTCOUNTER
-        self.test_and_reconnect()
         try:
             ftp_mdtm = self.FTPS.sendcmd("MDTM " + ftp_fn)
             ret0 = self.makemtime(ftp_mdtm)
             return ret0
         except Exception as e:
             printlog(0, str(e) + ": cannot get ftp file modification time")
-            return -1
+            if str(type(e).__name__) == "error_perm":
+                return -1
+            return -2
 
 
 # class StasEncrypt:
@@ -473,6 +469,25 @@ class StasEncrypt(object):
                 printlog(0, str(e) + ": cannot save temp file!")
                 return -1, ""
 
+    # fallback of "Encrypt_and_uploadFTP_parallel" if not sufficient memory:
+    # encrypts local files in ftp_path serially and uploads it to FTP
+    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn1, fmts, fsize):
+        local_fn = local_fn1
+        f, suffix = self.encrypt_otf(local_fn)
+        if f == -1:
+            printlog(0, "Aborting encrypted file upload")
+            return -1
+        local_fn = local_fn + suffix
+        local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
+        ftp_fn = ftp_path + "/" + local_fn0
+        res0 = self.STASFTP.ftp_wrapper(lambda: self.STASFTP.upload_file(f, ftp_fn, fsize))
+        f.close()
+        if res0 == -1:
+            printlog("Could not upload/MFMT to FTP, continuing!")
+        else:
+            printlog(1, "Upload of: " + local_fn + " - success")
+        res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
+
     # AES - decrypts ftp file and write it to local file
     def decrypt_otf(self, infile, outfile, fts):
         try:
@@ -495,7 +510,7 @@ class StasEncrypt(object):
     def DecryptFTP_and_download(self, local_path, fn, fts, fsize):
         global UNENC_TOKEN
         printlog(2, "Downloading from FTP to RAM: " + fn)
-        f_encrypted, voidresp = self.STASFTP.download_file(fn, fsize)
+        f_encrypted = self.STASFTP.ftp_wrapper(lambda: self.STASFTP.download_file(fn, fsize))
         if f_encrypted == -1:
             printlog(0, "Cannot download from FTP: " + fn + ", skipping")
             return
@@ -527,92 +542,6 @@ class StasEncrypt(object):
         else:
             printlog(0, "Cannot decrypt/save " + fn + "!")
 
-    # AES - Encrypts files in ftp_path to memory in parallel if possible and uploads it to ftp
-    '''def Encrypt_and_uploadFTP_parallel(self, stasftp, ftp_path, uploadlist):
-        global PARALLEL
-        printlog(2, "Parallel encryption " + str(PARALLEL))
-        if not uploadlist:
-            return 0
-        printlog(2, "Checking for sufficient memory for parallel encryption")
-        freemem = psutil.virtual_memory()[1]
-        neededmem = sum([sz for (_, _, _, sz) in uploadlist])
-        printlog(2, "Free:" + str(freemem) + ", Needed: " + str(neededmem))
-        if neededmem * 1.15 > freemem or not PARALLEL:
-            printlog(1, "Not enough free RAM for parallel encryption, switching to serial encryption ...")
-            for u in uploadlist:
-                fn, ts, _, fs = u
-                res = self.Encrypt_and_uploadtoFTP(ftp_path, fn, ts, fs)
-            return res
-        printlog(1, "Starting parallel encryption of " + str(len(uploadlist)) + " files")
-        t0 = time.time()
-        with Pool(cpu_count()) as p:
-            flist = p.map(encrypt_otf_standalone, uploadlist)
-        printlog(2, "Encryption took " + str(time.time() - t0) + " sec.")
-        for f, local_fn, fmts, fsize in flist:
-            local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
-            ftp_fn = ftp_path + "/" + local_fn0
-            if f == -1:
-                printlog(2, "Skipping upload of file " + local_fn0)
-            try:
-                printlog(2, "Uploading " + ftp_fn + " to FTP: ")
-                res0 = stasftp.upload_file(f, ftp_fn, fsize)
-                f.close()
-                if res0 == -1:
-                    raise("FTP upload error")
-                else:
-                    printlog(1, "Upload of: " + local_fn + " - success")
-                res0 = stasftp.mk_utc_ftp_timestamp(fmts, ftp_fn)
-                if res0 == -1:
-                    raise("FTP MFMT error")
-            except Exception as e:
-                printlog(0, str(e) + ": upload/MFMT to FTP failed!")
-        return 0'''
-
-    # fallback of "Encrypt_and_uploadFTP_parallel" if not sufficient memory:
-    # encrypts local files in ftp_path serially and uploads it to FTP
-    def Encrypt_and_uploadtoFTP(self, ftp_path, local_fn1, fmts, fsize):
-        local_fn = local_fn1
-        f, suffix = self.encrypt_otf(local_fn)
-        if f == -1:
-            printlog(0, "Aborting encrypted file upload")
-            return -1
-        local_fn = local_fn + suffix
-        local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
-        ftp_fn = ftp_path + "/" + local_fn0
-        try:
-            res0, voidresp = self.STASFTP.upload_file(f, ftp_fn, fsize)
-            f.close()
-            if res0 == -1:
-                raise("FTP upload error")
-            else:
-                printlog(1, "Upload of: " + local_fn + " - success")
-            res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
-            if res0 == -1:
-                raise("FTP MFMT error")
-            return 0
-        except Exception as e:
-            printlog(0, str(e) + ": upload/MFMT to FTP failed!")
-            sys.exit()
-            return -1
-
-
-# this is called by parallel processing pool for "Encrypt_and_uploadFTP_parallel" above
-'''def encrypt_otf_standalone(param):
-        infile, timestamp, key, fsize = param
-        try:
-            f_in = open(infile, "rb")
-            data = f_in.read(-1)
-        except Exception as e:
-            printlog(0, str(e) + ": cannot open infile, returning -1")
-            return -1
-        f_in.close()
-        cipher = AES.new(key, AES.MODE_EAX)
-        ciphertext, tag = cipher.encrypt_and_digest(data)
-        f = io.BytesIO()
-        [f.write(x) for x in (cipher.nonce, tag, ciphertext)]
-        f.seek(0)
-        return f, infile, timestamp, fsize'''
-
 
 # removes non-ascii characters from a string
 def make_ascii(txt):
@@ -627,17 +556,17 @@ def make_ascii(txt):
 
 # delets recursively a ftp dir
 def deleteFTPDirectoryRecursive(sftp, ftpdir):
-    res, e = sftp.rmd(ftpdir)
-    if res == -1 and str(e)[:3] == "550" and str(e)[-5:] == "empty":
+    res = sftp.ftp_wrapper(lambda: sftp.rmd(ftpdir))
+    if res == -1:   # and str(e)[:3] == "550" and str(e)[-5:] == "empty":
         printlog(1, "Changing to ftp dir " + ftpdir + " and deleting it recursivly ...")
-        maindir = sftp.mlsd(ftpdir)
+        maindir = sftp.ftp_wrapper(lambda: sftp.mlsd(ftpdir))
         dirlist = [m for m in maindir]
         for m in dirlist:
             if m[1]["type"] == "file":
-                sftp.delete(ftpdir + "/" + m[0])
+                sftp.ftp_wrapper(lambda: sftp.delete(ftpdir + "/" + m[0]))
             elif m[1]["type"] == "dir":
                 deleteFTPDirectoryRecursive(sftp, ftpdir + "/" + m[0])
-        sftp.rmd(ftpdir)
+        sftp.ftp_wrapper(lambda: sftp.rmd(ftpdir))
     return
 
 
@@ -663,35 +592,22 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         printlog(2, "Syncing local:" + local_path + " --> FTP:" + ftp_path)
         # change to FTP Dir, create directory if it does not exist
         printlog(2, "Changing FTP dir to " + ftp_path)
-        res0 = sftp.cwd(ftp_path)
-        if res0 == -1:
+        res0 = sftp.ftp_wrapper(lambda: sftp.cwd(ftp_path))
+        if res0 != 0:
             printlog(1, "FTP:" + ftp_path + " does not exist, creating new dir")
-            res1 = sftp.mkd(ftp_path, os.path.getmtime(local_path))
-            if res1 == 0:
-                res2 = sftp.cwd(ftp_path)
-                if res2 == -1:
-                    printlog(0, "Cannot change to new ftp dir, aborting ...")
-                    return -1
-            else:
-                printlog(0, "Cannot create new ftp dir, aborting ...")
-                return -1
+            sftp.ftp_wrapper(lambda: sftp.mkd(ftp_path, os.path.getmtime(local_path)))
+            sftp.ftp_wrapper(lambda: sftp.cwd(ftp_path))
     elif mode == "restore":
         printlog(2, "Syncing FTP:" + ftp_path + " --> local:" + local_path)
         # create local dir if not exists
         os.makedirs(local_path, exist_ok=True)
-        # change to FTP Dir, create directory if it does not exist
+        # change to FTP Dir
         printlog(2, "Changing FTP dir to " + ftp_path)
-        res0 = sftp.cwd(ftp_path)
-        if res0 == -1:
-            printlog(0, "Cannot change to path " + ftp_path + " on FTP, exiting ...")
-            sys.exit()
+        sftp.ftp_wrapper(lambda: sftp.cwd(ftp_path))
     # Read FTP directory
     printlog(1, "Reading FTP directory " + ftp_path)
-    ftp_listdir = sftp.mlsd(ftp_path)
-    ftp_listdir0 = sftp.mlsd(ftp_path)
-    if ftp_listdir == -1 or ftp_listdir0 == -1:
-        printlog(0, "Cannot list ftp directory content, aborting ...")
-        return -1
+    ftp_listdir = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
+    ftp_listdir0 = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
     ftp_files = [(m[0],  ftp_path + "/" + m[0], m[1]["size"], sftp.get_modification_time(ftp_path + "/" + m[0]), senc.vignere_decrypt(m[0]))
                  for m in ftp_listdir if m[1]["type"] == "file"]
     ftp_dirs = [m[0] for m in ftp_listdir0 if m[1]["type"] == "dir"]
@@ -701,8 +617,8 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         dir_dirs = next(os.walk(local_path))[1]
         dir_files = next(os.walk(local_path))[2]
     except Exception as e:
-        printlog(0, "Cannot list local content, aborting ...")
-        sys.exit()
+        printlog(0, "Cannot list local content, exiting ...")
+        return -1
     dir_file_det = []
     for df in dir_files:
         fn = local_path + "/" + df
@@ -729,11 +645,11 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                     source_ts = datetime.datetime.fromtimestamp(sts)
                     printlog(1, "Incomplete file on FTP: adding " + sfn0 + " (" + str(source_ts) + ") to upload queue")
                     printlog(1, "   Size on FTP , Size on source, Ratio:" + str(fsize) + " " + str(ssize) + " " + str(sizeratio))
-                    sftp.delete(ffn)
+                    sftp.ftp_wrapper(lambda: sftp.delete(ffn))
                 elif (matched and sts > fts):
                     source_ts = datetime.datetime.fromtimestamp(sts)
                     printlog(1, "Replacment because of newer: adding " + sfn0 + " (" + str(source_ts) + ") to upload queue")
-                    sftp.delete(ffn)
+                    sftp.ftp_wrapper(lambda: sftp.delete(ffn))
                 else:
                     printlog(1, "New upload: adding " + sfn0 + " to FTP upload queue")
                 senc.Encrypt_and_uploadtoFTP(ftp_path, sfn, sts, ssize)
@@ -753,7 +669,6 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                     break
             if (matched and abs(fts - sts) > 5):
                 ftp_ts = datetime.datetime.fromtimestamp(fts)
-                sys.exit()
                 printlog(1, "Replacment because of newer: adding " + ffn0 + str(ftp_ts) + " to download queue")
                 senc.DecryptFTP_and_download(local_path, ffn, fts, fsize)
             elif not matched:
@@ -771,7 +686,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
                     break
             if not matched:
                 printlog(1, ffn0 + " not found locally, deleting from FTP ...")
-                sftp.delete(ffn)
+                sftp.ftp_wrapper(lambda: sftp.delete(ffn))
     elif mode == "restore":
         # Part IIb. compare local to FTP and delete files on local which are not on FTP
         printlog(1, "Deleting remotely not existing files on local drive")
@@ -992,5 +907,8 @@ if __name__ == "__main__":
         printlog(2, "FTP '" + sftp.FTP_HOST + "' connected!")
     senc = StasEncrypt(KEY_PASSWD, VIGENERE_KEY, sftp)
     t0 = time.time()
-    SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
-    printlog(1, "Sync completed in " + str(time.time() - t0) + " sec.!")
+    res0 = SyncLocalDir(sftp, senc, SOURCEPATH, FTP_PATH, 1, mode=STASMODE)
+    if res0 == -1:
+        printlog(0, "Sync not completed!")
+    else:
+        printlog(1, "Sync completed in " + str(time.time() - t0) + " sec.!")
