@@ -587,7 +587,7 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
     local_path = remove_last_from_string_recursive(local_path, "/")
     ftp_path = remove_last_from_string_recursive(ftp_path, "/")
     printlog(-1, "---- Syncing FTP dir: " + ftp_path + " ----")
-    printlog(2, "Recursion no. " + str(recursion))
+    printlog(2, "Recursion level #" + str(recursion))
     if mode == "backup":
         printlog(2, "Syncing local:" + local_path + " --> FTP:" + ftp_path)
         # change to FTP Dir, create directory if it does not exist
@@ -606,10 +606,12 @@ def SyncLocalDir(sftp, senc, local_path, ftp_path, recursion, mode="backup"):
         sftp.ftp_wrapper(lambda: sftp.cwd(ftp_path))
     # Read FTP directory
     printlog(1, "Reading FTP directory " + ftp_path)
-    ftp_listdir = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
-    ftp_listdir0 = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
-    ftp_files = [(m[0],  ftp_path + "/" + m[0], m[1]["size"], sftp.get_modification_time(ftp_path + "/" + m[0]), senc.vignere_decrypt(m[0]))
-                 for m in ftp_listdir if m[1]["type"] == "file"]
+    # ftp_listdir = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
+    ftp_listdir = list(sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path)))
+    # ftp_listdir0 = sftp.ftp_wrapper(lambda: sftp.mlsd(ftp_path))
+    ftp_listdir0 = ftp_listdir.copy()
+    ftp_files = [(m[0],  ftp_path + "/" + m[0], m[1]["size"], sftp.ftp_wrapper(lambda: sftp.get_modification_time(ftp_path + "/" + m[0])),
+                  senc.vignere_decrypt(m[0])) for m in ftp_listdir if m[1]["type"] == "file"]
     ftp_dirs = [m[0] for m in ftp_listdir0 if m[1]["type"] == "dir"]
     # Read local directory
     printlog(1, "Reading local directory " + local_path)
@@ -782,6 +784,12 @@ if __name__ == "__main__":
             time.sleep(0.1)
             os.makedirs(STASDIR + "/keys")
             os.makedirs(STASDIR + "/config")
+            f = open(STASDIR + "/config/stasftp.cfg", "w")
+            cfgcontext = ["[CONFIG]", "FTP_HOST = url.of.ftp.server", "FTP_USER = username", "FTP_PASSWD = password",
+                          "MAXTRY = 5", "SLEEPTRY = 20", "", "[LOG]", "# OUTPUT/LOG_VERBOSITY", "# 0 ... Errors",
+                          "# 1 ... -""- + warnings", "# 2 ... -""- + info", "OUTPUT_VERBOSITY = 2", "LOG_VERBOSITY = 2"]
+            for cfgitem in cfgcontext:
+                f.write(cfgitem + "\n")
             os.makedirs(STASDIR + "/exclude")
             os.makedirs(STASDIR + "/log")
             os.makedirs(STASDIR + "/tmp")
@@ -854,6 +862,7 @@ if __name__ == "__main__":
         FTP_HOST = stasftpcfg["CONFIG"]["FTP_HOST"]
         FTP_USER = stasftpcfg["CONFIG"]["FTP_USER"]
         FTP_PASSWD = stasftpcfg["CONFIG"]["FTP_PASSWD"]
+        
         try:
             OUTPUT_VERBOSITY = int(stasftpcfg["LOG"]["OUTPUT_VERBOSITY"])
             LOG_VERBOSITY = int(stasftpcfg["LOG"]["LOG_VERBOSITY"])
@@ -861,8 +870,18 @@ if __name__ == "__main__":
             OUTPUT_VERBOSITY = 2
             LOG_VERBOSITY = 2
     except Exception as e:
-        printlog(0, str(e) + ": Cannot get (complete) STASFTP config, exiting ...")
+        printlog(0, str(e) + ": Cannot read STASFTP config, exiting ...")
         sys.exit()
+    try:
+        MAXTRY = int(stasftpcfg["CONFIG"]["MAXTRY"])
+    except:
+        printlog(1, "MAXTRY not defined, setting to default!")
+        MAXTRY = 5
+    try:
+        SLEEPTRY = int(stasftpcfg["CONFIG"]["SLEEPTRY"])
+    except:
+        printlog(1, "SLEEPTRY not defined, setting to default!")
+        SLEEPTRY = 15
     # import / generate AES_key file
     try:
         KEY_PASSWD = base64.b64decode(open(STASDIR + "/keys/AES_key", "rb").read())
