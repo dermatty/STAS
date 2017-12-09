@@ -480,12 +480,13 @@ class StasEncrypt(object):
         local_fn = local_fn + suffix
         local_fn0 = self.vignere_encrypt(local_fn.split("/")[-1])
         ftp_fn = ftp_path + "/" + local_fn0
+        printlog(2, "Uploading to FTP: " + local_fn + " ...")
         res0 = self.STASFTP.ftp_wrapper(lambda: self.STASFTP.upload_file(f, ftp_fn, fsize))
         f.close()
         if res0 == -1:
             printlog("Could not upload/MFMT to FTP, continuing!")
         else:
-            printlog(1, "Upload of: " + local_fn + " - success")
+            printlog(1, "Upload - success !")
         res0 = self.STASFTP.mk_utc_ftp_timestamp(fmts, ftp_fn)
 
     # AES - decrypts ftp file and write it to local file
