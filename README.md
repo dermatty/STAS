@@ -4,10 +4,9 @@ STASFTP is built upon python ftplib and syncs local files/directies with remote 
 diskspace usually. In case files cannot be encrypted due to lack of memory (pycrypto needs lots of RAM), these files are uploaded unencrypted!!
 Usage:
 
-stasftp --local /path/to/sourcedir --remote /path/on/ftp --mode backup/restore
-        --log logfile_in_~/.stasftp/log --exclude excludefile_in_~/.stasftp/exclude
-stasftp -l /path/to/sourcedir -r /path/on/ftp --m backup/restore                         
-        -o logfile_in_~/.stasftp/log -e excludefile_in_~/.stasftp/exclude
+stasftp --local /path/to/sourcedir --remote /path/on/ftp --mode backup/restore --log logfile_in_~/.stasftp/log --exclude excludefile_in_~/.stasftp/exclude
+
+stasftp -l /path/to/sourcedir -r /path/on/ftp --m backup/restore -o logfile_in_~/.stasftp/log -e excludefile_in_~/.stasftp/exclude
 
 stasftp default dir: ~/.stasftp -> will be created on first run
 
