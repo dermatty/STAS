@@ -1,0 +1,15 @@
+# config file has to be in ~/.stasftp/config/
+[CONFIG]
+FTP_HOST = ftp.host.com
+FTP_USER = abcdefg
+FTP_PASSWD = mypassword
+MAXTRY = 5
+SLEEPTRY = 20
+
+[LOG]
+# OUTPUT/LOG_VERBOSITY
+# 0 ... Errors
+# 1 ... -""- + warnings
+# 2 ... -""- + info
+OUTPUT_VERBOSITY = 2
+LOG_VERBOSITY = 2
